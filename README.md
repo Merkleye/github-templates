@@ -90,15 +90,29 @@ the file it replaced.
 
 ## Versioning
 
-`v1` is a moving major tag: it always points at the newest backwards-
+`v1` is a moving major ref: it always points at the newest backwards-
 compatible release of the `1.x` line, the same convention `actions/checkout`
-uses. Callers pin to `@v1` and get fixes without doing anything.
+uses for its major tag. Callers pin to `@v1` and get fixes without doing
+anything.
 
 - **Backwards-compatible** — a new input with a default, a bumped action pin,
   a clearer summary: merged to `main`, then `v1` is moved forward.
 - **Breaking** — an input removed or renamed, a default that changes
   behaviour, a new required secret: gets `v2`, and `v1` stays where it is
   until every caller has moved.
+
+`v1` is currently a **branch**, not a tag, so moving it is a fast-forward
+push:
+
+```sh
+git push origin main:v1
+```
+
+A tag would be the more conventional choice and is a drop-in replacement —
+`uses: ...@v1` resolves either, and a tag wins over a branch of the same
+name. Protect the `v1` branch (or convert it to a tag) before this repo has
+more than a couple of people pushing to it: an accidental force-push to `v1`
+lands in every repo in the org at once.
 
 Pin to an exact commit SHA instead of `@v1` if a repo wants to opt out of
 automatic updates entirely.
