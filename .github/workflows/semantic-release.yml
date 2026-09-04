@@ -1,0 +1,183 @@
+name: semantic-release
+
+# Reusable: runs semantic-release against the calling repo's own
+# .releaserc / release.config. What version to cut, what to publish, and what
+# to attach are decided by that config — this workflow only assembles the
+# environment semantic-release needs, which is the part every repo was
+# copying.
+#
+# What it assembles:
+#   - a full-history checkout (semantic-release reads every commit since the
+#     last tag; a shallow one silently finds nothing to release)
+#   - the repo's mise toolchain
+#   - optionally, a GitHub App token, when releases must push through branch
+#     protection or reach a second repository (the default GITHUB_TOKEN can
+#     do neither), plus the App's bot identity on the release commit
+#   - optionally, an .npmrc for publishing to a registry
+#
+# The caller owns the trigger. Both shapes are in use across the org and both
+# are legitimate: `push` to the default branch for zero-touch releases, or
+# `workflow_dispatch` where cutting a release is a deliberate act. A `push`
+# caller must make sure its release commit carries [skip ci] (semantic-release
+# does this by default) or the workflow retriggers itself.
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: Runner label.
+        required: false
+        type: string
+        default: ubuntu-latest
+      timeout-minutes:
+        description: Job timeout.
+        required: false
+        type: number
+        default: 30
+      lfs:
+        description: >-
+          Check out git-lfs objects. Required where the published artifact
+          contains LFS-tracked files, or the release ships pointer stubs.
+        required: false
+        type: boolean
+        default: false
+      app-token:
+        description: >-
+          Mint a GitHub App installation token and release with it instead of
+          GITHUB_TOKEN. Needs the APP_ID and APP_PRIVATE_KEY secrets.
+        required: false
+        type: boolean
+        default: false
+      app-repositories:
+        description: >-
+          Newline-separated repositories the App token should cover. Defaults
+          to the calling repository alone. List more only when the release
+          genuinely writes to them (e.g. syncing a dashboard to a website
+          repo) — the token is as broad as this list.
+        required: false
+        type: string
+        default: ""
+      npm-registry-url:
+        description: >-
+          Registry to authenticate against, e.g. https://npm.pkg.github.com.
+          Empty skips the .npmrc setup entirely.
+        required: false
+        type: string
+        default: ""
+      npm-scope:
+        description: Package scope for the registry, e.g. "@merkleye".
+        required: false
+        type: string
+        default: ""
+      install-command:
+        description: Command that installs the release tooling.
+        required: false
+        type: string
+        default: npm ci
+      pre-release-command:
+        description: >-
+          Optional command run after install and before semantic-release —
+          the last chance to refuse to ship. Validation belongs here; building
+          belongs in the release config's own prepare step, so a dry run
+          exercises it too.
+        required: false
+        type: string
+        default: ""
+      dry-run:
+        description: Run semantic-release with --dry-run, publishing nothing.
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      APP_ID:
+        description: GitHub App ID. Required when app-token is true.
+        required: false
+      APP_PRIVATE_KEY:
+        description: GitHub App private key. Required when app-token is true.
+        required: false
+      NPM_TOKEN:
+        description: >-
+          Registry auth token. Defaults to GITHUB_TOKEN, which is what
+          publishing to GitHub Packages in the same org needs.
+        required: false
+
+permissions: {}
+
+jobs:
+  release:
+    name: semantic-release
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: write # tags, the release commit, the GitHub Release
+      packages: write # publishing to GitHub Packages
+      issues: write # semantic-release comments on released issues/PRs
+      pull-requests: write
+    steps:
+      - name: Mint a GitHub App token
+        id: app-token
+        if: inputs.app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          repositories: ${{ inputs.app-repositories != '' && inputs.app-repositories || github.event.repository.name }}
+
+      - name: Resolve the release token
+        id: token
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          DEFAULT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          token="${APP_TOKEN:-$DEFAULT_TOKEN}"
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+
+      # fetch-depth: 0 — semantic-release decides the next version from every
+      # commit since the last tag, and finds none in a shallow clone.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          lfs: ${{ inputs.lfs }}
+          token: ${{ steps.token.outputs.token }}
+
+      # GitHub attributes a bot commit by the bot *user's* id, not the App's
+      # — they are different numbers, and using the App id leaves the release
+      # commit showing an unlinked author. The bot user is public, so one
+      # lookup gets it.
+      - name: Configure the App's git identity
+        if: inputs.app-token
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+          bot_id="$(gh api "/users/${APP_SLUG}%5Bbot%5D" --jq .id)"
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${bot_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+
+      - uses: Merkleye/github-templates/.github/actions/setup-mise@v1
+
+      # Not managing the Node version — mise already put Node on PATH from
+      # mise.toml. This only writes the .npmrc that @semantic-release/npm and
+      # `npm publish` authenticate with.
+      - name: Configure registry auth
+        if: inputs.npm-registry-url != ''
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          registry-url: ${{ inputs.npm-registry-url }}
+          scope: ${{ inputs.npm-scope }}
+
+      - name: Install release tooling
+        run: ${{ inputs.install-command }}
+
+      - name: Pre-release checks
+        if: inputs.pre-release-command != ''
+        run: ${{ inputs.pre-release-command }}
+
+      - name: Run semantic-release
+        env:
+          GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN != '' && secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}
+        run: npx semantic-release ${{ inputs.dry-run && '--dry-run' || '' }}

@@ -1,0 +1,60 @@
+name: Prune stale PR previews
+
+# Reusable: deletes any Cloudflare Pages preview deployment older than
+# max-age-days. Call it from a `schedule` (plus `workflow_dispatch`, so it can
+# be run by hand when a project's preview list has visibly grown).
+#
+# This is the safety net, not the primary cleanup — cf-pages-preview-cleanup
+# removes a PR's preview the moment the PR closes. This catches the ones that
+# never got that event: a cancelled run, a deleted branch, a preview created
+# before the cleanup workflow existed.
+#
+# Production deployments are never candidates: the prune action filters to
+# `environment == "preview"` before it deletes anything.
+
+on:
+  workflow_call:
+    inputs:
+      project-name:
+        description: Cloudflare Pages project name (e.g. merkleye-website).
+        required: true
+        type: string
+      max-age-days:
+        description: Delete preview deployments older than this many days.
+        required: false
+        type: number
+        default: 7
+      runs-on:
+        description: Runner label.
+        required: false
+        type: string
+        default: ubuntu-latest
+      timeout-minutes:
+        description: Job timeout.
+        required: false
+        type: number
+        default: 5
+    secrets:
+      CLOUDFLARE_API_TOKEN:
+        description: Cloudflare API token with Pages edit permission.
+        required: true
+      CLOUDFLARE_ACCOUNT_ID:
+        description: Cloudflare account ID.
+        required: true
+
+permissions: {}
+
+jobs:
+  prune:
+    name: Prune previews older than ${{ inputs.max-age-days }} days
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+    steps:
+      - uses: Merkleye/github-templates/.github/actions/cf-pages-prune@v1
+        with:
+          project-name: ${{ inputs.project-name }}
+          max-age-days: ${{ inputs.max-age-days }}
+          api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

@@ -1,0 +1,208 @@
+name: PR preview image
+
+# Reusable: builds every image a repo ships and pushes it to GHCR under
+# per-PR tags, so a reviewer can `docker run` the change instead of reading
+# a Containerfile diff and hoping.
+#
+# Two tags per image per PR:
+#   <image>:pr-<number>              moving, always the PR's latest head
+#   <image>:pr-<number>-<short sha>  immutable, so a review can name a build
+#
+# Stable tags (`latest`, semver) are never emitted here. That is the whole
+# safety property of this workflow: a PR can publish, but it can never
+# publish something a deployment would pick up.
+#
+# Fork PRs get a job that explains why no image appears rather than a red X.
+# Publishing from a fork would mean either `pull_request_target` (which runs
+# the fork's own Containerfile with a package-write token) or long-lived
+# registry credentials. Neither is worth a preview image.
+
+on:
+  workflow_call:
+    inputs:
+      images:
+        description: >-
+          JSON array of {image, context, file} objects, one per image to
+          build. Keep it in sync with whatever the repo's release script
+          publishes — the point of a preview is that it is the same build.
+          Example:
+          [{"image":"merkleye","context":".","file":"Containerfile"}]
+        required: true
+        type: string
+      registry:
+        description: Container registry to push to.
+        required: false
+        type: string
+        default: ghcr.io
+      tag-prefix:
+        description: >-
+          Prefix for the per-PR tags. The cleanup workflow deletes exactly
+          this prefix, so change it in both places or not at all.
+        required: false
+        type: string
+        default: pr-
+      builder:
+        description: >-
+          `docker` for docker/setup-buildx-action, or `blacksmith` for
+          useblacksmith/setup-docker-builder on a Blacksmith runner.
+        required: false
+        type: string
+        default: docker
+      platforms:
+        description: >-
+          Target platforms, e.g. `linux/amd64,linux/arm64`. Empty builds for
+          the runner's own architecture, which is what a preview usually
+          wants — multi-arch roughly doubles the wait for a reviewer.
+        required: false
+        type: string
+        default: ""
+      runs-on:
+        description: Runner label.
+        required: false
+        type: string
+        default: ubuntu-latest
+      timeout-minutes:
+        description: Job timeout, per image.
+        required: false
+        type: number
+        default: 20
+
+permissions: {}
+
+jobs:
+  publish-preview:
+    name: Publish PR preview image (${{ matrix.image }})
+    if: github.event.action != 'closed' && github.event.pull_request.head.repo.fork == false
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.images) }}
+    concurrency:
+      group: pr-preview-publish-${{ github.event.pull_request.number }}-${{ matrix.image }}
+      cancel-in-progress: true
+    steps:
+      - name: Derive preview context
+        id: context
+        env:
+          PREVIEW_SHA: ${{ github.event.pull_request.head.sha }}
+          REGISTRY: ${{ inputs.registry }}
+          IMAGE: ${{ matrix.image }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          short_sha="${PREVIEW_SHA::7}"
+          # GHCR rejects an upper-case path segment, and an org name's casing
+          # on GitHub is display only.
+          owner="$(printf '%s' "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          preview_tag="${TAG_PREFIX}${PR_NUMBER}"
+
+          {
+            echo "image=${REGISTRY}/${owner}/${IMAGE}"
+            echo "preview_tag=${preview_tag}"
+            echo "preview_sha_tag=${preview_tag}-${short_sha}"
+            echo "preview_sha=${PREVIEW_SHA}"
+            echo "created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "${GITHUB_OUTPUT}"
+
+      # Explicit head SHA, not the merge ref: the tag names a commit that
+      # exists in the PR, so `docker run <image>:pr-12-abc1234` is traceable
+      # back to something a reviewer can check out.
+      # persist-credentials: false — nothing here pushes to git.
+      - name: Check out PR head commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.context.outputs.preview_sha }}
+          persist-credentials: false
+
+      # Only when a cross-architecture build was actually asked for; a
+      # native-only preview does not need the emulation layer.
+      - name: Set up QEMU
+        if: inputs.platforms != ''
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
+
+      - name: Set up Buildx
+        if: inputs.builder != 'blacksmith'
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Set up Blacksmith builder
+        if: inputs.builder == 'blacksmith'
+        uses: useblacksmith/setup-docker-builder@v1
+
+      - name: Log in to the registry
+        uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3.5.0
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push (${{ matrix.image }})
+        if: inputs.builder != 'blacksmith'
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          push: true
+          provenance: false
+          platforms: ${{ inputs.platforms }}
+          tags: |
+            ${{ steps.context.outputs.image }}:${{ steps.context.outputs.preview_tag }}
+            ${{ steps.context.outputs.image }}:${{ steps.context.outputs.preview_sha_tag }}
+          build-args: |
+            OCI_VERSION=${{ steps.context.outputs.preview_sha_tag }}
+            OCI_REVISION=${{ steps.context.outputs.preview_sha }}
+            OCI_CREATED=${{ steps.context.outputs.created_at }}
+            OCI_REF_NAME=${{ steps.context.outputs.preview_tag }}
+            OCI_SOURCE=${{ github.server_url }}/${{ github.repository }}
+
+      - name: Build and push (${{ matrix.image }}, Blacksmith)
+        if: inputs.builder == 'blacksmith'
+        uses: useblacksmith/build-push-action@v2
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          push: true
+          provenance: false
+          platforms: ${{ inputs.platforms }}
+          tags: |
+            ${{ steps.context.outputs.image }}:${{ steps.context.outputs.preview_tag }}
+            ${{ steps.context.outputs.image }}:${{ steps.context.outputs.preview_sha_tag }}
+          build-args: |
+            OCI_VERSION=${{ steps.context.outputs.preview_sha_tag }}
+            OCI_REVISION=${{ steps.context.outputs.preview_sha }}
+            OCI_CREATED=${{ steps.context.outputs.created_at }}
+            OCI_REF_NAME=${{ steps.context.outputs.preview_tag }}
+            OCI_SOURCE=${{ github.server_url }}/${{ github.repository }}
+
+      - name: Summarize preview publication
+        run: |
+          {
+            echo "### Published PR preview image (${{ matrix.image }})"
+            echo
+            echo "- Image: \`${{ steps.context.outputs.image }}:${{ steps.context.outputs.preview_tag }}\`"
+            echo "- Image: \`${{ steps.context.outputs.image }}:${{ steps.context.outputs.preview_sha_tag }}\`"
+            echo "- Source PR: #${{ github.event.pull_request.number }}"
+            echo "- Source commit: \`${{ steps.context.outputs.preview_sha }}\`"
+            echo "- Stable tags intentionally untouched: \`latest\` and semantic-version tags are never emitted from this workflow."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  fork-preview-note:
+    name: Preview publish unavailable for fork PRs
+    if: github.event.action != 'closed' && github.event.pull_request.head.repo.fork == true
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Explain fork PR behavior
+        run: |
+          {
+            echo "### Preview publish skipped"
+            echo
+            echo "Fork-based pull requests do not publish preview images from this workflow."
+            echo "This avoids granting package-write access to untrusted PR code via \`pull_request_target\` or long-lived registry credentials."
+          } >> "${GITHUB_STEP_SUMMARY}"

@@ -1,0 +1,39 @@
+# .github/workflows/release.yml — for a repo whose release has to push
+# through branch protection, or write to a second repository. The default
+# GITHUB_TOKEN can do neither, so this mints a GitHub App token instead. The
+# App must be installed with access to every repository listed below.
+name: Release
+
+# Manual: a release is a deliberate act, not a side effect of every merge.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+permissions: {}
+
+# A job that calls a reusable workflow must grant at least the permissions the
+# called job asks for -- GitHub lets a called workflow narrow the token, never
+# widen it. These blocks mirror the template's own job permissions exactly.
+
+jobs:
+  release:
+    # Guards against a dispatch fired against the wrong ref.
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+      packages: write
+      issues: write
+      pull-requests: write
+    uses: Merkleye/github-templates/.github/workflows/semantic-release.yml@v1
+    with:
+      app-token: true
+      app-repositories: |
+        merkleye
+        merkleye-website
+      runs-on: blacksmith-2vcpu-ubuntu-2404
+    secrets:
+      APP_ID: ${{ secrets.APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}

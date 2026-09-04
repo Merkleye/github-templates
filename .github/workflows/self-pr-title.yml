@@ -1,0 +1,15 @@
+name: PR Title
+
+# Dogfood: this repo lints its own PR titles with the template it ships. If
+# the template breaks, this is the first PR that finds out.
+
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  title:
+    uses: Merkleye/github-templates/.github/workflows/pr-title.yml@v1

@@ -1,0 +1,91 @@
+name: PR Preview Cleanup
+
+# Reusable: deletes the Cloudflare Pages preview deployment(s) for a PR's
+# branch alias as soon as the PR closes (merged or not), and rewrites the
+# preview comment to say when it went away.
+#
+# Call this from a `pull_request` / `types: [closed]` workflow. The scheduled
+# cf-pages-preview-prune workflow is the safety net for previews that slip
+# past this — a cancelled run, a force-deleted branch, a PR closed while the
+# cleanup workflow itself was being changed.
+
+on:
+  workflow_call:
+    inputs:
+      project-name:
+        description: Cloudflare Pages project name (e.g. merkleye-website).
+        required: true
+        type: string
+      branch:
+        description: >-
+          Branch alias to delete. Defaults to `pr-<number>`, matching what the
+          cf-pages-deploy action publishes for a PR.
+        required: false
+        type: string
+        default: ""
+      comment-header:
+        description: >-
+          Sticky-comment header to rewrite. Must match the header the deploy
+          used, or the notice lands in a second comment instead of replacing
+          the stale link.
+        required: false
+        type: string
+        default: pr-preview
+      comment-message:
+        description: >-
+          Notice left in place of the preview link. `{timestamp}` is replaced
+          with the deletion time in UTC.
+        required: false
+        type: string
+        default: The preview was deleted on {timestamp}.
+      runs-on:
+        description: Runner label.
+        required: false
+        type: string
+        default: ubuntu-latest
+      timeout-minutes:
+        description: Job timeout.
+        required: false
+        type: number
+        default: 5
+    secrets:
+      CLOUDFLARE_API_TOKEN:
+        description: Cloudflare API token with Pages edit permission.
+        required: true
+      CLOUDFLARE_ACCOUNT_ID:
+        description: Cloudflare account ID.
+        required: true
+
+permissions: {}
+
+jobs:
+  cleanup:
+    name: Delete PR preview
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+      pull-requests: write # rewrite the sticky preview comment
+    steps:
+      - name: Delete the preview deployment for this PR
+        uses: Merkleye/github-templates/.github/actions/cf-pages-prune@v1
+        with:
+          project-name: ${{ inputs.project-name }}
+          branch: ${{ inputs.branch != '' && inputs.branch || format('pr-{0}', github.event.pull_request.number) }}
+          api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Render the deletion notice
+        id: notice
+        env:
+          TEMPLATE: ${{ inputs.comment-message }}
+        run: |
+          set -euo pipefail
+          timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "message=${TEMPLATE//\{timestamp\}/$timestamp}" >> "$GITHUB_OUTPUT"
+
+      - name: Update the preview comment
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        with:
+          header: ${{ inputs.comment-header }}
+          message: ${{ steps.notice.outputs.message }}

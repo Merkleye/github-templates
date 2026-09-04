@@ -1,0 +1,38 @@
+# .github/workflows/pr-preview-image.yml
+name: PR preview image lifecycle
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review, closed]
+
+permissions: {}
+
+# A job that calls a reusable workflow must grant at least the permissions the
+# called job asks for -- GitHub lets a called workflow narrow the token, never
+# widen it. These blocks mirror the template's own job permissions exactly.
+
+jobs:
+  publish:
+    if: github.event.action != 'closed'
+    permissions:
+      contents: read
+      packages: write
+    uses: Merkleye/github-templates/.github/workflows/ghcr-pr-preview-image.yml@v1
+    with:
+      # Keep this list in step with whatever the release script publishes.
+      images: >-
+        [
+          {"image":"merkleye","context":".","file":"Containerfile"},
+          {"image":"merkleye-dnstwist","context":"sidecars/dnstwist","file":"sidecars/dnstwist/Containerfile"}
+        ]
+      builder: blacksmith
+      runs-on: blacksmith-2vcpu-ubuntu-2404
+
+  cleanup:
+    if: github.event.action == 'closed'
+    permissions:
+      packages: write
+    uses: Merkleye/github-templates/.github/workflows/ghcr-pr-preview-cleanup.yml@v1
+    with:
+      packages: '["merkleye","merkleye-dnstwist"]'
+      runs-on: blacksmith-2vcpu-ubuntu-2404

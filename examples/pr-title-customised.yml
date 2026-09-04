@@ -1,0 +1,28 @@
+# .github/workflows/pr-title.yml — every knob, for reference. Most repos want
+# the defaults; override only what the repo actually needs.
+name: PR Title
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  title:
+    uses: Merkleye/github-templates/.github/workflows/pr-title.yml@v1
+    with:
+      runs-on: blacksmith-2vcpu-ubuntu-2404
+      types: |
+        feat
+        fix
+        docs
+        chore
+      scopes: |
+        api
+        ui
+      require-scope: true
+      subject-pattern: ^(?![A-Z]).+$
+      ignore-labels: |
+        dependencies

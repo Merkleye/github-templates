@@ -1,0 +1,32 @@
+# .github/workflows/release.yml
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  # An in-flight release must never be cancelled mid-push; later triggers
+  # queue behind it instead of racing it.
+  group: release-main
+  cancel-in-progress: false
+
+permissions: {}
+
+# A job that calls a reusable workflow must grant at least the permissions the
+# called job asks for -- GitHub lets a called workflow narrow the token, never
+# widen it. These blocks mirror the template's own job permissions exactly.
+
+jobs:
+  release:
+    permissions:
+      contents: write
+      packages: write
+      issues: write
+      pull-requests: write
+    uses: Merkleye/github-templates/.github/workflows/semantic-release.yml@v1
+    with:
+      npm-registry-url: https://npm.pkg.github.com
+      npm-scope: "@merkleye"
+      pre-release-command: npm run validate
+      lfs: true

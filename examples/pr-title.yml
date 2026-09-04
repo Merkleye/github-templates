@@ -1,0 +1,20 @@
+# .github/workflows/pr-title.yml
+name: PR Title
+
+# pull_request_target runs the check from the base branch, so the rules can't
+# be edited by the PR under review. Nothing here checks out or runs PR code,
+# which is what makes that safe. Use plain `pull_request` instead if the repo
+# prefers it — the template supports both.
+#
+# `edited` matters: without it, fixing a rejected title never re-runs the
+# check and the PR stays red.
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  title:
+    uses: Merkleye/github-templates/.github/workflows/pr-title.yml@v1

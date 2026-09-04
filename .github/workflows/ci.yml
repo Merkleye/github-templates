@@ -1,0 +1,82 @@
+name: CI
+
+# This repo's own gate. It has no application code — what can break here is a
+# workflow that does not parse, a reusable workflow whose interface changed
+# without its examples following, or an action pin that quietly went mutable.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint workflows
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.7
+        run: |
+          set -euo pipefail
+          curl -sSfL -o actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          tar -xzf actionlint.tar.gz actionlint
+          ./actionlint --version
+
+      # The examples are caller workflows for a repo that isn't this one, so
+      # actionlint's shellcheck/pyflakes integration is what's useful there,
+      # not its "this reusable workflow input doesn't exist" check.
+      - name: actionlint
+        run: ./actionlint -color .github/workflows/*.yml examples/*.yml
+
+      - name: Every third-party action is pinned to a SHA
+        run: python3 scripts/check-action-pins.py
+
+      - name: Every YAML file parses
+        run: |
+          set -euo pipefail
+          pip install --quiet pyyaml
+          python3 - <<'PY'
+          import pathlib, sys, yaml
+
+          bad = []
+          for path in sorted(pathlib.Path(".").rglob("*.y*ml")):
+              if ".git/" in str(path):
+                  continue
+              try:
+                  yaml.safe_load(path.read_text())
+              except yaml.YAMLError as err:
+                  bad.append(f"{path}: {err}")
+
+          if bad:
+              print("\n".join(bad), file=sys.stderr)
+              sys.exit(1)
+          print("All YAML parses.")
+          PY
+
+  shellcheck:
+    name: Shellcheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Shellcheck the shipped scripts
+        run: |
+          set -euo pipefail
+          shellcheck --version
+          find .github/actions scripts -name '*.sh' -print0 | xargs -0 -r shellcheck

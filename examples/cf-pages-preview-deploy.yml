@@ -1,0 +1,42 @@
+# .github/workflows/pr-preview.yml
+#
+# The build stays in the repo — it is the part that is genuinely different
+# everywhere. The deploy and the sticky comment come from the template.
+name: PR Preview
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: pr-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  deploy-preview:
+    # Secrets are not available to a `pull_request` run from a fork, so the
+    # deploy would fail rather than leak. Skip it explicitly instead.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write # the sticky preview comment
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Whatever this repo's build happens to be.
+      - uses: ./.github/actions/build-site
+
+      - uses: Merkleye/github-templates/.github/actions/cf-pages-deploy@v1
+        with:
+          project-name: merkleye-website
+          directory: dist
+          branch: pr-${{ github.event.pull_request.number }}
+          api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Optional: a bullet list instead of a single headline link.
+          # comment-links: |
+          #   Dark mode|dark.html
+          #   Light mode|light.html

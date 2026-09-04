@@ -1,0 +1,153 @@
+name: Deploy to Cloudflare Pages
+description: >-
+  Publishes a built directory to Cloudflare Pages — either to production, or
+  to a per-PR preview branch with a sticky preview-link comment on the PR.
+
+# merkleye-website and design both deploy a static build to Cloudflare Pages
+# on push to main, and both deploy a per-PR preview to the branch alias
+# `pr-<number>` and then sticky-comment the link. The only things that
+# differed were the project name, the directory, and which links the comment
+# listed — all inputs here.
+#
+# What this action deliberately does NOT do is build the site. Each repo's
+# build is its own (Astro, a bespoke build-preview.mjs, whatever comes next),
+# so it stays in the repo, and this action takes the directory it produced.
+#
+# Posting the comment needs `pull-requests: write` on the calling job. Set
+# comment: false if the caller wants to compose its own message from the
+# `url` output.
+
+inputs:
+  project-name:
+    description: Cloudflare Pages project name (e.g. merkleye-website).
+    required: true
+  directory:
+    description: Built directory to publish (e.g. dist, preview/dist).
+    required: true
+  branch:
+    description: >-
+      Pages branch alias to deploy to. Leave empty for a production deploy.
+      For a PR preview this is conventionally pr-<number>, which is also what
+      the cf-pages-preview-cleanup workflow deletes.
+    required: false
+    default: ""
+  api-token:
+    description: Cloudflare API token with Pages edit permission.
+    required: true
+  account-id:
+    description: Cloudflare account ID.
+    required: true
+  comment:
+    description: >-
+      Post/update a sticky comment with the preview link. Ignored when the
+      run is not a pull_request event.
+    required: false
+    default: "true"
+  comment-header:
+    description: >-
+      Sticky-comment header. Must match the header the cleanup workflow uses,
+      or the closed-PR notice will land in a second comment instead of
+      replacing this one.
+    required: false
+    default: pr-preview
+  comment-title:
+    description: Headline text for the sticky comment.
+    required: false
+    default: Preview deployed
+  comment-links:
+    description: >-
+      Optional newline-separated `Label|relative-path` pairs rendered as a
+      bullet list under the headline, e.g. `Dark mode|dark.html`. When empty
+      the headline links straight to the deployment root.
+    required: false
+    default: ""
+
+outputs:
+  url:
+    description: >-
+      The deployment URL — the stable branch alias for a preview deploy, the
+      deployment URL for a production one.
+    value: ${{ steps.resolve.outputs.url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Record deploy time
+      id: timestamp
+      shell: bash
+      run: echo "now=$(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> "$GITHUB_OUTPUT"
+
+    - name: Deploy to Cloudflare Pages
+      id: deploy
+      uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
+      with:
+        apiToken: ${{ inputs.api-token }}
+        accountId: ${{ inputs.account-id }}
+        command: >-
+          pages deploy ${{ inputs.directory }}
+          --project-name=${{ inputs.project-name }}
+          ${{ inputs.branch != '' && format('--branch={0}', inputs.branch) || '' }}
+
+    # A branch deploy gets a stable alias URL that survives every push to the
+    # PR; that is the one worth putting in a comment. A production deploy has
+    # no alias, so fall back to the deployment URL.
+    - name: Resolve the deployment URL
+      id: resolve
+      shell: bash
+      env:
+        ALIAS_URL: ${{ steps.deploy.outputs.pages-deployment-alias-url }}
+        DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment-url }}
+      run: |
+        set -euo pipefail
+        url="${ALIAS_URL:-$DEPLOYMENT_URL}"
+        if [ -z "$url" ]; then
+          echo "::error::wrangler-action returned no deployment URL"
+          exit 1
+        fi
+        echo "url=$url" >> "$GITHUB_OUTPUT"
+        echo "Deployed to $url"
+
+    - name: Render the comment body
+      id: body
+      if: ${{ inputs.comment == 'true' && github.event_name == 'pull_request' }}
+      shell: bash
+      env:
+        TITLE: ${{ inputs.comment-title }}
+        URL: ${{ steps.resolve.outputs.url }}
+        LINKS: ${{ inputs.comment-links }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        BASE_REF: ${{ github.event.pull_request.base.ref }}
+        REPO: ${{ github.repository }}
+        SERVER_URL: ${{ github.server_url }}
+        NOW: ${{ steps.timestamp.outputs.now }}
+      run: |
+        set -euo pipefail
+        {
+          echo 'message<<PREVIEW_COMMENT_EOF'
+          if [ -n "$LINKS" ]; then
+            echo "**${TITLE}:**"
+            echo
+            # `Label|relative-path` per line. Blank lines are skipped so a
+            # caller can indent the input block readably.
+            while IFS='|' read -r label path; do
+              [ -z "${label// /}" ] && continue
+              echo "- [${label}](${URL%/}/${path#/})"
+            done <<< "$LINKS"
+          else
+            echo "**${TITLE}:** ${URL}"
+          fi
+          echo
+          echo "Commit: ${HEAD_SHA}"
+          echo "Diff: ${SERVER_URL}/${REPO}/compare/${BASE_REF}...${HEAD_SHA}"
+          echo "Last updated: ${NOW}"
+          echo
+          echo "This link stays the same across pushes to this PR and is removed once the PR is closed."
+          echo PREVIEW_COMMENT_EOF
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Comment the preview link on the PR
+      if: ${{ inputs.comment == 'true' && github.event_name == 'pull_request' }}
+      uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+      with:
+        header: ${{ inputs.comment-header }}
+        message: ${{ steps.body.outputs.message }}

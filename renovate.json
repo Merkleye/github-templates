@@ -1,0 +1,6 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Policy comes from Merkleye/renovate-config through org inheritance. This file only stops Renovate opening an onboarding PR. Keeping the action pins in this repo current is the whole point of letting Renovate near it -- a stale pin here is a stale pin in every repo that calls these workflows.",
+  "extends": ["config:recommended"],
+  "labels": ["dependencies"]
+}

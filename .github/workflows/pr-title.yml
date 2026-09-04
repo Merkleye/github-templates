@@ -1,0 +1,110 @@
+name: PR Title
+
+# Reusable: validates that a pull request title follows the Conventional
+# Commits spec (https://www.conventionalcommits.org).
+#
+# Merkleye repos squash-merge, so the PR title becomes the commit subject on
+# the default branch — and that subject is what semantic-release parses to
+# decide the next version. A PR titled "updates" is a release that never
+# happens, or a major bump nobody asked for.
+#
+# The caller owns the trigger, because the two sensible choices are a real
+# trade-off rather than a default:
+#   - `pull_request` runs the check from the PR's own branch. Simple, but a
+#     fork PR's run has no write scope (it does not need any here).
+#   - `pull_request_target` runs it from the base branch, so the check config
+#     is always the merged-in one and cannot be edited by the PR under review.
+#     Nothing in this workflow checks out or executes PR code, which is what
+#     makes pull_request_target safe to use for it.
+# Either way, include `edited` in `types:` — without it, fixing a rejected
+# title never re-runs the check and the PR stays red.
+
+on:
+  workflow_call:
+    inputs:
+      types:
+        description: >-
+          Newline-separated Conventional Commit types to accept. Defaults to
+          the Angular set plus `build`, `ci` and `revert`, which is what the
+          conventionalcommits preset understands.
+        required: false
+        type: string
+        default: |
+          feat
+          fix
+          docs
+          style
+          refactor
+          perf
+          test
+          build
+          ci
+          chore
+          revert
+      scopes:
+        description: >-
+          Newline-separated scopes to allow. Empty (the default) allows any
+          scope; set it only in a repo with a settled component vocabulary.
+        required: false
+        type: string
+        default: ""
+      require-scope:
+        description: Require every title to carry a scope.
+        required: false
+        type: boolean
+        default: false
+      subject-pattern:
+        description: >-
+          Regex the subject (the part after `type(scope):`) must match. The
+          default rejects a leading upper-case letter, keeping subjects in
+          the imperative lower-case style the changelog renders.
+        required: false
+        type: string
+        default: ^(?![A-Z]).+$
+      subject-pattern-error:
+        description: Message shown when subject-pattern does not match.
+        required: false
+        type: string
+        default: |
+          The subject "{subject}" must start with a lower-case letter, e.g.
+          "feat: add ct log import".
+      ignore-labels:
+        description: >-
+          Newline-separated labels that skip the check entirely. Useful for
+          bot-authored PRs whose titles are set by tooling.
+        required: false
+        type: string
+        default: ""
+      runs-on:
+        description: Runner label. Override for a repo on self-hosted runners.
+        required: false
+        type: string
+        default: ubuntu-latest
+      timeout-minutes:
+        description: Job timeout.
+        required: false
+        type: number
+        default: 5
+
+permissions: {}
+
+jobs:
+  conventional-title:
+    name: Validate PR title
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      # Read-only: the action reads the PR title and reports through the
+      # check run. It never writes a comment or a label.
+      pull-requests: read
+    steps:
+      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: ${{ inputs.types }}
+          scopes: ${{ inputs.scopes }}
+          requireScope: ${{ inputs.require-scope }}
+          subjectPattern: ${{ inputs.subject-pattern }}
+          subjectPatternError: ${{ inputs.subject-pattern-error }}
+          ignoreLabels: ${{ inputs.ignore-labels }}

@@ -1,0 +1,49 @@
+name: Setup mise
+description: >-
+  Installs the toolchain pinned in the calling repository's mise.toml and puts
+  it on PATH for the rest of the job.
+
+# Every Merkleye repo drives its toolchain from mise.toml, so every workflow
+# in every repo starts with the same jdx/mise-action step. Centralising it
+# here means the action's own pinned SHA is bumped once, by one Renovate PR,
+# instead of drifting per repo and per workflow — which is exactly what had
+# already happened: merkleye's ci.yml and perf.yml were pinned to two
+# different mise-action commits.
+#
+# This wraps the toolchain *installer* only. What gets installed is still each
+# repo's own mise.toml — the template deliberately has no opinion about it.
+
+inputs:
+  version:
+    description: >-
+      mise version to install (e.g. 2026.8.1). Empty means the latest release,
+      which is what most repos want; pin it when a repo has hit a regression.
+    required: false
+    default: ""
+  install:
+    description: Run `mise install` to provision the tools in mise.toml.
+    required: false
+    default: "true"
+  cache:
+    description: Cache the mise tool directory between runs.
+    required: false
+    default: "true"
+  experimental:
+    description: Enable mise's experimental features (needed by some backends).
+    required: false
+    default: "false"
+  working-directory:
+    description: Directory containing mise.toml, if not the repository root.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+      with:
+        version: ${{ inputs.version }}
+        install: ${{ inputs.install }}
+        cache: ${{ inputs.cache }}
+        experimental: ${{ inputs.experimental }}
+        working_directory: ${{ inputs.working-directory }}

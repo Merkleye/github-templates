@@ -1,0 +1,144 @@
+name: PR preview image cleanup
+
+# Reusable: deletes the per-PR container package versions published by
+# ghcr-pr-preview-image once the PR closes. Call it from a `pull_request`
+# workflow with `types: [closed]`.
+#
+# The deletion rule is deliberately conservative. A package version is
+# removed only when *every* tag it carries is a preview tag for this PR. A
+# digest that also carries `latest`, a semver tag, or another PR's tag is
+# left alone and reported as a warning — GHCR shares one version across
+# identical digests, so a preview that happened to build bit-for-bit
+# identically to a release would otherwise take the release down with it.
+
+on:
+  workflow_call:
+    inputs:
+      packages:
+        description: >-
+          JSON array of package names to clean, e.g.
+          ["merkleye","merkleye-dnstwist"]. These are the `image` values from
+          ghcr-pr-preview-image, not the full registry paths.
+        required: true
+        type: string
+      tag-prefix:
+        description: >-
+          Prefix the preview tags were published under. Must match the
+          publishing workflow's tag-prefix.
+        required: false
+        type: string
+        default: pr-
+      runs-on:
+        description: Runner label.
+        required: false
+        type: string
+        default: ubuntu-latest
+      timeout-minutes:
+        description: Job timeout, per package.
+        required: false
+        type: number
+        default: 10
+
+permissions: {}
+
+jobs:
+  cleanup-preview:
+    name: Clean up PR preview images (${{ matrix.package }})
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(inputs.packages) }}
+    steps:
+      - name: Delete preview package versions
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        env:
+          OWNER: ${{ github.repository_owner }}
+          PACKAGE_NAME: ${{ matrix.package }}
+          PR_TAG: ${{ inputs.tag-prefix }}${{ github.event.pull_request.number }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const owner = process.env.OWNER;
+            const packageName = process.env.PACKAGE_NAME.toLowerCase();
+            const prTag = process.env.PR_TAG;
+            const isPreviewTag = (tag) => tag === prTag || tag.startsWith(`${prTag}-`);
+
+            // Orgs and user accounts have different package routes, and a
+            // repo can be moved between them; ask rather than assume.
+            const ownerInfo = await github.request('GET /users/{username}', {
+              username: owner,
+            });
+            const ownerType = ownerInfo.data.type;
+            const listRoute =
+              ownerType === 'Organization'
+                ? 'GET /orgs/{org}/packages/{package_type}/{package_name}/versions'
+                : 'GET /users/{username}/packages/{package_type}/{package_name}/versions';
+            const deleteRoute =
+              ownerType === 'Organization'
+                ? 'DELETE /orgs/{org}/packages/{package_type}/{package_name}/versions/{package_version_id}'
+                : 'DELETE /users/{username}/packages/{package_type}/{package_name}/versions/{package_version_id}';
+            const routeParams =
+              ownerType === 'Organization'
+                ? { org: owner, package_type: 'container', package_name: packageName }
+                : { username: owner, package_type: 'container', package_name: packageName };
+
+            let versions;
+            try {
+              versions = await github.paginate(listRoute, {
+                ...routeParams,
+                per_page: 100,
+              });
+            } catch (error) {
+              // A PR that never published (fork, or closed before the build
+              // finished) leaves no package at all. That is not a failure.
+              if (error.status === 404) {
+                await core.summary
+                  .addHeading('No preview package versions found')
+                  .addRaw(`No package named \`${packageName}\` exists yet, so there is nothing to clean up for \`${prTag}\`.`)
+                  .write();
+                return;
+              }
+
+              throw error;
+            }
+
+            const previewOnlyVersions = versions.filter((version) => {
+              const tags = version.metadata?.container?.tags ?? [];
+              return tags.some(isPreviewTag) && tags.every(isPreviewTag);
+            });
+
+            const mixedTagVersions = versions.filter((version) => {
+              const tags = version.metadata?.container?.tags ?? [];
+              return tags.some(isPreviewTag) && !tags.every(isPreviewTag);
+            });
+
+            for (const version of previewOnlyVersions) {
+              await github.request(deleteRoute, {
+                ...routeParams,
+                package_version_id: version.id,
+              });
+            }
+
+            const deletedTags = previewOnlyVersions.map((version) => {
+              const tags = version.metadata?.container?.tags ?? [];
+              return tags.length > 0 ? tags.join(', ') : `(untagged preview digest ${version.name})`;
+            });
+
+            await core.summary
+              .addHeading('PR preview cleanup result')
+              .addList(
+                deletedTags.length > 0
+                  ? deletedTags.map((tags) => `Deleted preview version with tags: \`${tags}\``)
+                  : [`No preview-only versions matched \`${prTag}\`.`],
+              )
+              .write();
+
+            if (mixedTagVersions.length > 0) {
+              core.warning(
+                `Skipped ${mixedTagVersions.length} package version(s) because they had both preview tags and non-preview tags.`,
+              );
+            }

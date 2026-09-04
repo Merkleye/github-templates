@@ -1,0 +1,63 @@
+name: Prune Cloudflare Pages previews
+description: >-
+  Deletes Cloudflare Pages preview deployments, either for one branch alias or
+  every preview older than N days. Never touches production deployments.
+
+# The script this wraps was byte-for-byte identical in merkleye-website and
+# design before it moved here. It is the single home of the logic now; the
+# cf-pages-preview-cleanup and cf-pages-preview-prune reusable workflows both
+# call this action rather than carrying their own copy.
+
+inputs:
+  project-name:
+    description: Cloudflare Pages project name (e.g. merkleye-website).
+    required: true
+  branch:
+    description: >-
+      Delete every preview deployment for this exact branch alias, e.g.
+      pr-123. Mutually exclusive with max-age-days.
+    required: false
+    default: ""
+  max-age-days:
+    description: >-
+      Delete every preview deployment older than this many days. Mutually
+      exclusive with branch.
+    required: false
+    default: ""
+  api-token:
+    description: Cloudflare API token with Pages edit permission.
+    required: true
+  account-id:
+    description: Cloudflare account ID.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Prune Cloudflare Pages preview deployments
+      shell: bash
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.api-token }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ inputs.account-id }}
+        PROJECT_NAME: ${{ inputs.project-name }}
+        BRANCH: ${{ inputs.branch }}
+        MAX_AGE_DAYS: ${{ inputs.max-age-days }}
+      run: |
+        set -euo pipefail
+
+        if [ -n "$BRANCH" ] && [ -n "$MAX_AGE_DAYS" ]; then
+          echo "::error::pass either branch or max-age-days, not both"
+          exit 1
+        fi
+
+        args=()
+        if [ -n "$BRANCH" ]; then
+          args+=(--branch "$BRANCH")
+        elif [ -n "$MAX_AGE_DAYS" ]; then
+          args+=(--max-age-days "$MAX_AGE_DAYS")
+        else
+          echo "::error::one of branch or max-age-days is required"
+          exit 1
+        fi
+
+        "${GITHUB_ACTION_PATH}/prune-cf-pages-previews.sh" "${args[@]}"

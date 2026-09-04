@@ -1,0 +1,25 @@
+# .github/workflows/pr-preview-cleanup.yml
+name: PR Preview Cleanup
+
+on:
+  pull_request:
+    branches: [main]
+    types: [closed]
+
+permissions: {}
+
+# A job that calls a reusable workflow must grant at least the permissions the
+# called job asks for -- GitHub lets a called workflow narrow the token, never
+# widen it. These blocks mirror the template's own job permissions exactly.
+
+jobs:
+  cleanup:
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: Merkleye/github-templates/.github/workflows/cf-pages-preview-cleanup.yml@v1
+    with:
+      project-name: merkleye-website
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
