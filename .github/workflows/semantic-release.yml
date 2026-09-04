@@ -108,11 +108,17 @@ jobs:
     name: semantic-release
     runs-on: ${{ inputs.runs-on }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
+    # A called workflow's permissions are absolute for its job and a caller
+    # must grant at least them, so this is the minimum rather than the union:
+    # asking for issues/pull-requests write here would force every caller to
+    # grant it, including the repos whose .releaserc sets successComment and
+    # failComment to false. A repo that does want semantic-release to comment
+    # on released issues needs those two scopes added here — and then every
+    # caller has to grant them too, so raise it as a change to this template
+    # rather than working around it locally.
     permissions:
       contents: write # tags, the release commit, the GitHub Release
       packages: write # publishing to GitHub Packages
-      issues: write # semantic-release comments on released issues/PRs
-      pull-requests: write
     steps:
       - name: Mint a GitHub App token
         id: app-token
