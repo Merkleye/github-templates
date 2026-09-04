@@ -1,15 +1,18 @@
 # .github/workflows/pr-title.yml
 name: PR Title
 
-# pull_request_target runs the check from the base branch, so the rules can't
-# be edited by the PR under review. Nothing here checks out or runs PR code,
-# which is what makes that safe. Use plain `pull_request` instead if the repo
-# prefers it — the template supports both.
+# `pull_request` is the right default, and the only trigger that works on the
+# PR that introduces this check: `pull_request_target` reads the workflow file
+# from the base branch, so a workflow that exists only on a PR branch never
+# runs -- no check, no failure, nothing to notice. Adopt with this, and switch
+# to pull_request_target afterwards if the repo wants the rules pinned to the
+# base branch (worth it on a public repo taking fork PRs; nothing here checks
+# out or executes PR code, so it is safe either way).
 #
 # `edited` matters: without it, fixing a rejected title never re-runs the
 # check and the PR stays red.
 on:
-  pull_request_target:
+  pull_request:
     types: [opened, edited, synchronize, reopened]
 
 permissions:
@@ -17,4 +20,9 @@ permissions:
 
 jobs:
   title:
+    # A job calling a reusable workflow must grant at least the permissions
+    # the called job asks for -- a called workflow can narrow the token, never
+    # widen it.
+    permissions:
+      pull-requests: read
     uses: Merkleye/github-templates/.github/workflows/pr-title.yml@v1

@@ -8,15 +8,26 @@ name: PR Title
 # decide the next version. A PR titled "updates" is a release that never
 # happens, or a major bump nobody asked for.
 #
-# The caller owns the trigger, because the two sensible choices are a real
-# trade-off rather than a default:
-#   - `pull_request` runs the check from the PR's own branch. Simple, but a
-#     fork PR's run has no write scope (it does not need any here).
-#   - `pull_request_target` runs it from the base branch, so the check config
-#     is always the merged-in one and cannot be edited by the PR under review.
-#     Nothing in this workflow checks out or executes PR code, which is what
-#     makes pull_request_target safe to use for it.
-# Either way, include `edited` in `types:` — without it, fixing a rejected
+# The caller owns the trigger, because the two choices are a real trade-off:
+#
+#   - `pull_request` runs the check from the PR's own branch. This is the
+#     right default, and the only one that works on the PR that *introduces*
+#     the check -- see below.
+#   - `pull_request_target` runs it from the base branch, so the rules are
+#     always the merged-in ones and cannot be edited by the PR under review.
+#     Nothing here checks out or executes PR code, which is what makes that
+#     safe. Worth it on a public repo taking fork PRs.
+#
+# The gotcha, and it is not obvious: `pull_request_target` reads the workflow
+# file from the BASE branch, so a workflow that exists only on a PR branch
+# never runs at all -- no check, no failure, nothing to notice. A repo
+# adopting this check for the first time therefore gets no signal on the very
+# PR that adds it, and the check only starts working after that PR merges.
+# Adopt with `pull_request` (the check is then exercised on its own PR, which
+# is also the proof that it works), and switch to `pull_request_target`
+# afterwards if the repo wants it.
+#
+# Either way, include `edited` in `types:` -- without it, fixing a rejected
 # title never re-runs the check and the PR stays red.
 
 on:

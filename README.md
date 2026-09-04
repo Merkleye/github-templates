@@ -60,6 +60,18 @@ jobs:
 That is the whole file. Every input has a default that matches what the org
 already does.
 
+### Adopting the PR-title check: use `pull_request`
+
+`pull_request_target` reads the workflow file from the **base** branch, so a
+workflow that exists only on a PR branch never runs — no check, no failure,
+nothing to notice. The PR that adopts the check gets no signal from it at
+all, and it only starts working once that PR merges.
+
+So adopt with `pull_request`, which runs from the PR's own branch and makes
+the adopting PR its own proof. Switch to `pull_request_target` afterwards if
+the repo wants the rules pinned to the base branch — nothing in this check
+executes PR code, so either is safe.
+
 ### Prerequisite: Actions access
 
 This repository is **private**, so each repo that calls these workflows needs
