@@ -29,7 +29,7 @@ jobs:
       # Whatever this repo's build happens to be.
       - uses: ./.github/actions/build-site
 
-      - uses: Merkleye/github-templates/.github/actions/cf-pages-deploy@v1
+      - uses: Merkleye/github-templates/.github/actions/cf-pages-deploy@main
         with:
           project-name: merkleye-website
           directory: dist

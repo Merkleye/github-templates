@@ -17,7 +17,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    uses: Merkleye/github-templates/.github/workflows/cf-pages-preview-cleanup.yml@v1
+    uses: Merkleye/github-templates/.github/workflows/cf-pages-preview-cleanup.yml@main
     with:
       project-name: merkleye-website
     secrets:

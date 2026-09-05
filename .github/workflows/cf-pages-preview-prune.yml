@@ -52,7 +52,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: Merkleye/github-templates/.github/actions/cf-pages-prune@v1
+      - uses: Merkleye/github-templates/.github/actions/cf-pages-prune@main
         with:
           project-name: ${{ inputs.project-name }}
           max-age-days: ${{ inputs.max-age-days }}

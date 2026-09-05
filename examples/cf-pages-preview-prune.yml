@@ -16,7 +16,7 @@ jobs:
   prune:
     permissions:
       contents: read
-    uses: Merkleye/github-templates/.github/workflows/cf-pages-preview-prune.yml@v1
+    uses: Merkleye/github-templates/.github/workflows/cf-pages-preview-prune.yml@main
     with:
       project-name: merkleye-website
       max-age-days: 7

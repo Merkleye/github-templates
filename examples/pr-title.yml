@@ -25,4 +25,4 @@ jobs:
     # widen it.
     permissions:
       pull-requests: read
-    uses: Merkleye/github-templates/.github/workflows/pr-title.yml@v1
+    uses: Merkleye/github-templates/.github/workflows/pr-title.yml@main

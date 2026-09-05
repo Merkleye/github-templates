@@ -39,7 +39,7 @@ Ready-to-paste caller workflows live in [`examples/`](examples).
 
 ## Using them
 
-Reference everything at the `v1` tag:
+Reference everything at `main`:
 
 ```yaml
 # .github/workflows/pr-title.yml
@@ -54,7 +54,7 @@ permissions:
 
 jobs:
   title:
-    uses: Merkleye/github-templates/.github/workflows/pr-title.yml@v1
+    uses: Merkleye/github-templates/.github/workflows/pr-title.yml@main
 ```
 
 That is the whole file. Every input has a default that matches what the org
@@ -72,12 +72,23 @@ the adopting PR its own proof. Switch to `pull_request_target` afterwards if
 the repo wants the rules pinned to the base branch — nothing in this check
 executes PR code, so either is safe.
 
-### Prerequisite: Actions access
+### Why this repository is public
 
-This repository is **private**, so each repo that calls these workflows needs
-them shared with it. In this repo: **Settings → Actions → General → Access →
-_Accessible from repositories in the Merkleye organization_**. Without it, a
-caller fails with `workflow was not found`.
+It holds workflow YAML, one bash script and this README — no secrets, no
+credentials, nothing proprietary.
+
+It is public because it has to be. A **public** repository cannot consume
+actions or reusable workflows from a private one, and no org setting closes
+that gap: the "accessible from repositories in the organization" toggle
+shares a private repo with the org's *private* repos only. Merkleye has
+public repos in the set (`merkleye-website`, `certspotter`, `dnstwist`,
+`certstream-server`), so a private templates repo would have left them
+either duplicating what everything else shares, or reaching for a read
+token and a checkout to work around it.
+
+Nothing here should ever need to be secret. If a template ever needs a
+value that does, the value belongs in the calling repo's secrets and reaches
+the template through a `secrets:` input — never inlined here.
 
 ### Extending, not forking
 
@@ -102,36 +113,37 @@ the file it replaced.
 
 ## Versioning
 
-`v1` is a moving major ref: it always points at the newest backwards-
-compatible release of the `1.x` line, the same convention `actions/checkout`
-uses for its major tag. Callers pin to `@v1` and get fixes without doing
-anything.
+Callers track `main`. There is no version ref to move and nothing to bump on
+release — merging here is the release, and every consuming repo picks the
+change up on its next run.
 
-- **Backwards-compatible** — a new input with a default, a bumped action pin,
-  a clearer summary: merged to `main`, then `v1` is moved forward.
-- **Breaking** — an input removed or renamed, a default that changes
-  behaviour, a new required secret: gets `v2`, and `v1` stays where it is
-  until every caller has moved.
+That is the right trade for this org: one team, eight repos, and templates
+whose blast radius is visible in the PR that changes them. A `v1` ref would
+add a step to every change and a second thing to get wrong, to buy staged
+rollout that nobody here is asking for.
 
-`v1` is currently a **branch**, not a tag, so moving it is a fast-forward
-push:
+The cost is real and worth stating plainly: **a bad merge to `main` reaches
+every repo at once.** What stands between a change and that is this repo's
+own CI — actionlint over the workflows *and* the examples, shellcheck over
+the scripts, and the pin check — plus the fact that every consumer's next PR
+exercises the templates for real. Protect `main` and require those checks
+before more than a couple of people are pushing here.
 
-```sh
-git push origin main:v1
+A repo that wants to opt out of automatic updates pins to an exact commit
+SHA instead:
+
+```yaml
+uses: Merkleye/github-templates/.github/workflows/pr-title.yml@a54a9da...
 ```
 
-A tag would be the more conventional choice and is a drop-in replacement —
-`uses: ...@v1` resolves either, and a tag wins over a branch of the same
-name. Protect the `v1` branch (or convert it to a tag) before this repo has
-more than a couple of people pushing to it: an accidental force-push to `v1`
-lands in every repo in the org at once.
-
-Pin to an exact commit SHA instead of `@v1` if a repo wants to opt out of
-automatic updates entirely.
+If staged rollout is ever genuinely needed — a breaking input change with
+consumers that cannot all move at once — the answer is a `v2` path or a
+release tag introduced at that point, not a version ref maintained
+speculatively from the start.
 
 Reusable workflows reference this repo's own composite actions by full path
-at `@v1` — self-referential on purpose, so that a caller pinned to `@v1` gets
-one coherent set of workflows *and* actions rather than a mix.
+at `@main`, self-referentially, so a workflow and the actions it calls are
+always read from the same commit rather than a mix.
 
 ## Conventions this repo holds itself to
 
@@ -161,4 +173,4 @@ one coherent set of workflows *and* actions rather than a mix.
 - `semantic-release.yml` handles the environment, not the release config.
   Repos that also publish container images do that through their own
   `.releaserc` exec plugin — a shared release-images script would be a
-  reasonable v1.1 once a second repo needs one.
+  reasonable addition once a second repo needs one.

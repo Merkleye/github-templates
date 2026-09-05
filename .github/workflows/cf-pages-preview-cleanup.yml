@@ -68,7 +68,7 @@ jobs:
       pull-requests: write # rewrite the sticky preview comment
     steps:
       - name: Delete the preview deployment for this PR
-        uses: Merkleye/github-templates/.github/actions/cf-pages-prune@v1
+        uses: Merkleye/github-templates/.github/actions/cf-pages-prune@main
         with:
           project-name: ${{ inputs.project-name }}
           branch: ${{ inputs.branch != '' && inputs.branch || format('pr-{0}', github.event.pull_request.number) }}

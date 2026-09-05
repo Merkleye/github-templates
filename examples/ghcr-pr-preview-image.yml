@@ -17,7 +17,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    uses: Merkleye/github-templates/.github/workflows/ghcr-pr-preview-image.yml@v1
+    uses: Merkleye/github-templates/.github/workflows/ghcr-pr-preview-image.yml@main
     with:
       # Keep this list in step with whatever the release script publishes.
       images: >-
@@ -32,7 +32,7 @@ jobs:
     if: github.event.action == 'closed'
     permissions:
       packages: write
-    uses: Merkleye/github-templates/.github/workflows/ghcr-pr-preview-cleanup.yml@v1
+    uses: Merkleye/github-templates/.github/workflows/ghcr-pr-preview-cleanup.yml@main
     with:
       packages: '["merkleye","merkleye-dnstwist"]'
       runs-on: blacksmith-2vcpu-ubuntu-2404

@@ -25,7 +25,7 @@ jobs:
     permissions:
       contents: write
       packages: write
-    uses: Merkleye/github-templates/.github/workflows/semantic-release.yml@v1
+    uses: Merkleye/github-templates/.github/workflows/semantic-release.yml@main
     with:
       app-token: true
       app-repositories: |

@@ -163,7 +163,7 @@ jobs:
           git config user.name "${APP_SLUG}[bot]"
           git config user.email "${bot_id}+${APP_SLUG}[bot]@users.noreply.github.com"
 
-      - uses: Merkleye/github-templates/.github/actions/setup-mise@v1
+      - uses: Merkleye/github-templates/.github/actions/setup-mise@main
 
       # Not managing the Node version — mise already put Node on PATH from
       # mise.toml. This only writes the .npmrc that @semantic-release/npm and

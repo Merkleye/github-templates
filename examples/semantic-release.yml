@@ -22,7 +22,7 @@ jobs:
     permissions:
       contents: write
       packages: write
-    uses: Merkleye/github-templates/.github/workflows/semantic-release.yml@v1
+    uses: Merkleye/github-templates/.github/workflows/semantic-release.yml@main
     with:
       npm-registry-url: https://npm.pkg.github.com
       npm-scope: "@merkleye"

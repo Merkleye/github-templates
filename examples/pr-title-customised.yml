@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   title:
-    uses: Merkleye/github-templates/.github/workflows/pr-title.yml@v1
+    uses: Merkleye/github-templates/.github/workflows/pr-title.yml@main
     with:
       runs-on: blacksmith-2vcpu-ubuntu-2404
       types: |
