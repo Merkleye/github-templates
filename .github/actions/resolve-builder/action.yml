@@ -1,0 +1,56 @@
+name: Resolve container builder
+description: >-
+  Decides whether a job builds with docker/* or useblacksmith/* actions, from
+  an explicit choice or from the runner label.
+
+# The runner and the builder are separate choices — the docker builder on a
+# Blacksmith runner is a legitimate combination — so they are separate inputs.
+# But in every real case so far the label implies the builder, and `auto`
+# spares a caller from stating it twice and getting it half-wrong.
+#
+# This lives in an action rather than inline because three reusable workflows
+# need the same answer, and three copies of the rule would drift into three
+# meanings of `auto` — which is the failure mode this whole repo is a response
+# to. It resolves in a step, not an expression, so the log records what was
+# chosen: `auto` guessing wrong is otherwise invisible in the YAML.
+
+inputs:
+  builder:
+    description: "`auto`, `docker`, or `blacksmith`."
+    required: false
+    default: auto
+  runs-on:
+    description: >-
+      The job's runner label, which `auto` reads. Anything containing
+      `blacksmith` resolves to the Blacksmith builder; everything else, GitHub-
+      hosted and self-hosted alike, resolves to Buildx.
+    required: true
+
+outputs:
+  builder:
+    description: "`docker` or `blacksmith` — never `auto`."
+    value: ${{ steps.resolve.outputs.builder }}
+
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      shell: bash
+      env:
+        BUILDER: ${{ inputs.builder }}
+        RUNNER_LABEL: ${{ inputs.runs-on }}
+      run: |
+        set -euo pipefail
+        builder="${BUILDER}"
+        if [ "${builder}" = auto ]; then
+          case "${RUNNER_LABEL}" in
+            *blacksmith*) builder=blacksmith ;;
+            *) builder=docker ;;
+          esac
+        fi
+        case "${builder}" in
+          docker|blacksmith) ;;
+          *) echo "builder must be auto, docker or blacksmith (got '${BUILDER}')" >&2; exit 1 ;;
+        esac
+        echo "Runner '${RUNNER_LABEL}' -> ${builder} builder."
+        echo "builder=${builder}" >> "${GITHUB_OUTPUT}"

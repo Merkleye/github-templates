@@ -1,0 +1,52 @@
+# .github/workflows/release.yml — for a repo whose release builds and pushes
+# a container image and attaches an SBOM to the GitHub Release.
+#
+# What actually builds the image is the repo's own `.releaserc`, through
+# @semantic-release/exec's prepareCmd calling scripts/release-image.sh. That
+# script is where the tags, the platforms and the SBOM live, because they are
+# decisions about this artifact. The template's job is only to make sure the
+# things that script shells out to — a builder, an authenticated registry,
+# syft — exist by the time it runs.
+name: Release
+
+# Manual: a release is a deliberate act, not a side effect of every merge.
+on:
+  workflow_dispatch:
+
+concurrency:
+  # An in-flight release must never be cancelled mid-push; later triggers
+  # queue behind it instead of racing it.
+  group: release-main
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  release:
+    # Guards against a dispatch fired against the wrong ref.
+    if: github.ref == 'refs/heads/main'
+    # A caller must grant at least what the called job asks for -- GitHub lets
+    # a called workflow narrow the token, never widen it. `packages: write` is
+    # what pushes the image.
+    permissions:
+      contents: write
+      packages: write
+    uses: Merkleye/github-templates/.github/workflows/semantic-release.yml@main
+    with:
+      # @semantic-release/git pushes CHANGELOG.md to a protected main, which
+      # the default GITHUB_TOKEN cannot do.
+      app-token: true
+      containers: true
+      # QEMU for arm64 only: the runner is amd64 and provides that natively.
+      container-platforms: arm64
+      install-syft: true
+    secrets:
+      APP_ID: ${{ secrets.APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+
+# `container-registry` defaults to ghcr.io and `container-builder` to `auto`,
+# which resolves from `runs-on` — so a Blacksmith release is the same file
+# with one line added:
+#
+#   with:
+#     runs-on: blacksmith-2vcpu-ubuntu-2404

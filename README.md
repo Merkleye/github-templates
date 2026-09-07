@@ -25,7 +25,8 @@ contract run. Those belong next to the code they test.
 | [`cf-pages-preview-prune.yml`](.github/workflows/cf-pages-preview-prune.yml) | Scheduled safety net: deletes preview deployments older than N days. |
 | [`ghcr-pr-preview-image.yml`](.github/workflows/ghcr-pr-preview-image.yml) | Builds and pushes per-PR container images to GHCR under `pr-<n>` tags. |
 | [`ghcr-pr-preview-cleanup.yml`](.github/workflows/ghcr-pr-preview-cleanup.yml) | Deletes those preview package versions when the PR closes. |
-| [`semantic-release.yml`](.github/workflows/semantic-release.yml) | Assembles the environment semantic-release needs and runs it. |
+| [`container-ci.yml`](.github/workflows/container-ci.yml) | Builds every image a repo ships and pushes nothing — the container-integrity gate. |
+| [`semantic-release.yml`](.github/workflows/semantic-release.yml) | Assembles the environment semantic-release needs and runs it, container builder and syft included. |
 
 ### Composite actions — `uses:` at the step level
 
@@ -34,6 +35,7 @@ contract run. Those belong next to the code they test.
 | [`setup-mise`](.github/actions/setup-mise) | Installs the toolchain pinned in the calling repo's `mise.toml`. One pin of `jdx/mise-action` for the whole org. |
 | [`cf-pages-deploy`](.github/actions/cf-pages-deploy) | Publishes a built directory to Cloudflare Pages, production or per-PR preview, with the sticky preview comment. |
 | [`cf-pages-prune`](.github/actions/cf-pages-prune) | Deletes Cloudflare Pages preview deployments by branch alias or age. Never touches production. |
+| [`resolve-builder`](.github/actions/resolve-builder) | Turns `auto` into `docker` or `blacksmith` from the runner label. One definition of `auto` for the three workflows that build images. |
 
 Ready-to-paste caller workflows live in [`examples/`](examples), including
 [`mise-tasks.yml`](examples/mise-tasks.yml) for the step-level `setup-mise`
@@ -111,6 +113,36 @@ Two exceptions worth knowing before converting a lint step:
 - **A step that needs setup mise does not provide** — a `pip install` of a
   library, a browser, a service container — keeps that setup in the workflow.
   The task is still `mise run <task>`.
+
+### Runners and builders
+
+Every workflow here takes a `runs-on` input defaulting to `ubuntu-latest`.
+One label, whichever kind of runner it names:
+
+```yaml
+runs-on: ubuntu-latest                    # GitHub-hosted
+runs-on: blacksmith-2vcpu-ubuntu-2404     # Blacksmith
+runs-on: self-hosted                      # your own pool
+```
+
+It is a single label, not a JSON array. A self-hosted pool that needs
+distinguishing should carry its own label rather than being addressed by
+AND-ing `[self-hosted, linux, x64]` — that is the shape every runner here
+already has, and it keeps one input type across every template.
+
+The three workflows that build containers take a second, separate input:
+`builder`, which chooses between `docker/*` and `useblacksmith/*` actions.
+It defaults to `auto`, which reads the runner label — anything containing
+`blacksmith` gets the Blacksmith builder, everything else gets Buildx — so
+the common case is one input, not two.
+
+They are separate inputs because the choice is genuinely separate: running
+the docker builder on a Blacksmith runner is a legitimate thing to want, and
+`auto` would otherwise make it unsayable. Set `builder` explicitly and it
+wins.
+
+`auto` logs which builder it picked. A wrong guess is otherwise invisible
+until a build behaves oddly for reasons nobody can see in the YAML.
 
 ### Why this repository is public
 
@@ -211,6 +243,15 @@ always read from the same commit rather than a mix.
   appears with the same Astro shape as the others, a `build-astro-site`
   action is the right next addition.
 - `semantic-release.yml` handles the environment, not the release config.
-  Repos that also publish container images do that through their own
-  `.releaserc` exec plugin — a shared release-images script would be a
-  reasonable addition once a second repo needs one.
+  It now assembles the container half of that environment too — builder,
+  registry login, syft — but what gets built, tagged and attached still lives
+  in each repo's `.releaserc` exec plugin and its `scripts/release-image.sh`.
+  Those scripts are near-identical in `merkleye`, `certspotter` and
+  `dnstwist`; a shared one is the obvious next extraction, and it is a script
+  rather than a workflow, so it wants an `sh` file in this repo and a
+  `curl`-free way to reach it. That is the part not yet designed.
+- `container-ci.yml` builds and throws the image away. It does not scan it,
+  test it, or check that it starts. `merkleye`'s perf suite runs the dnstwist
+  sidecar for real, but that is a repo-specific job, not a template. If a
+  second repo wants "does the container come up and answer /health", that is
+  a worthwhile input to add here rather than a third copy.

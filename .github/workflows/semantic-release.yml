@@ -14,6 +14,14 @@ name: semantic-release
 #     protection or reach a second repository (the default GITHUB_TOKEN can
 #     do neither), plus the App's bot identity on the release commit
 #   - optionally, an .npmrc for publishing to a registry
+#   - optionally, a container builder, a registry login and the syft CLI, for
+#     the repos whose release also builds and pushes an image
+#
+# The container half is here rather than in a release template of its own
+# because everything around it — the full-history checkout, the App token, the
+# bot identity, the toolchain, the install — is identical either way, and a
+# second workflow would have been a copy of this one with four steps added.
+# A repo that ships no image sets nothing and gets no container steps.
 #
 # The caller owns the trigger. Both shapes are in use across the org and both
 # are legitimate: `push` to the default branch for zero-touch releases, or
@@ -69,6 +77,47 @@ on:
         required: false
         type: string
         default: ""
+      containers:
+        description: >-
+          Set up a container builder and log in to a registry, for a release
+          whose prepare step builds and pushes images. The build itself stays
+          in the repo's own release script — this only assembles what that
+          script needs to exist on PATH and be authenticated.
+        required: false
+        type: boolean
+        default: false
+      container-registry:
+        description: Registry to log in to. Only read when `containers` is true.
+        required: false
+        type: string
+        default: ghcr.io
+      container-platforms:
+        description: >-
+          Architectures to install QEMU emulation for, e.g. `arm64`. Empty
+          skips QEMU, which is right for a release that publishes only the
+          runner's own architecture. This is the emulation list, not the
+          build's `--platform` — the release script still decides what it
+          builds.
+        required: false
+        type: string
+        default: ""
+      container-builder:
+        description: >-
+          `auto`, `docker`, or `blacksmith`. `auto` reads the runner label,
+          same rule as container-ci.yml: anything containing `blacksmith` gets
+          useblacksmith/*, everything else gets docker/*.
+        required: false
+        type: string
+        default: auto
+      install-syft:
+        description: >-
+          Put the syft CLI on PATH. Repos that attach an SBOM generate it from
+          inside their release script, per image and per platform, once the
+          image is actually built — so what they need here is the binary, not
+          a scanning action that would run at the wrong moment.
+        required: false
+        type: boolean
+        default: false
       install-command:
         description: Command that installs the release tooling.
         required: false
@@ -174,6 +223,45 @@ jobs:
         with:
           registry-url: ${{ inputs.npm-registry-url }}
           scope: ${{ inputs.npm-scope }}
+
+      # One rule for `auto`, shared with container-ci.yml and
+      # ghcr-pr-preview-image.yml — see .github/actions/resolve-builder.
+      - name: Resolve builder
+        id: builder
+        if: inputs.containers
+        uses: Merkleye/github-templates/.github/actions/resolve-builder@main
+        with:
+          builder: ${{ inputs.container-builder }}
+          runs-on: ${{ inputs.runs-on }}
+
+      - name: Set up QEMU
+        if: inputs.containers && inputs.container-platforms != ''
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
+        with:
+          platforms: ${{ inputs.container-platforms }}
+
+      - name: Set up Buildx
+        if: steps.builder.outputs.builder == 'docker'
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Set up Blacksmith builder
+        if: steps.builder.outputs.builder == 'blacksmith'
+        uses: useblacksmith/setup-docker-builder@v1
+
+      # GITHUB_TOKEN, not the App token: pushing a package needs `packages:
+      # write` on this repo, which the job already has, and the App token is
+      # scoped for git writes that may reach further than that.
+      - name: Log in to the container registry
+        if: inputs.containers
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ${{ inputs.container-registry }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install syft
+        if: inputs.install-syft
+        uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
 
       - name: Install release tooling
         run: ${{ inputs.install-command }}
