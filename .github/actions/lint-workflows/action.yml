@@ -1,0 +1,111 @@
+name: Lint workflows
+description: >-
+  Runs actionlint over a repo's workflows and enforces the org's `uses:`
+  conventions — SHA-pinned third-party actions, and no direct reference to an
+  action the org wraps.
+
+# The conventions are only real if something checks them. Without this, "every
+# repo resolves mise through setup-mise" is a thing someone has to remember
+# and periodically re-audit by hand — which is how five call sites in `design`
+# and one in `merkleye-website` kept their own copy of the pin long after the
+# shared action existed.
+#
+# Every rule is an input, because a repo that genuinely needs an exception
+# should declare it in its own caller where a reviewer can see it, rather than
+# being unable to adopt the check at all.
+#
+# actionlint reads workflow files only; the pin and ban checks also walk
+# composite actions, which is where the last raw references tend to hide.
+
+inputs:
+  actionlint:
+    description: Run actionlint.
+    required: false
+    default: "true"
+  actionlint-version:
+    description: actionlint release to download.
+    required: false
+    default: "1.7.7"
+  actionlint-paths:
+    description: >-
+      Space-separated globs for actionlint, expanded by the shell. Workflow
+      files only — actionlint does not read action.yml.
+    required: false
+    default: .github/workflows/*.yml
+  scan-paths:
+    description: >-
+      Newline-separated files or directories to walk for the `uses:` checks.
+      Directories are searched recursively for *.yml and *.yaml.
+    required: false
+    default: |
+      .github/workflows
+      .github/actions
+  require-sha-pins:
+    description: Require every third-party action to name a 40-character commit SHA.
+    required: false
+    default: "true"
+  allow-tags:
+    description: >-
+      Newline-separated `uses:` prefixes exempt from the SHA rule. The default
+      covers this templates repo referring to itself (pinning it would mean
+      rewriting every internal reference on every change) and useblacksmith/*,
+      which publishes major-version tags only. An entry here is the record of
+      an exception, so add one with a reason next to it.
+    required: false
+    default: |
+      Merkleye/github-templates/
+      useblacksmith/
+  banned-actions:
+    description: >-
+      Newline-separated `<prefix> <replacement>` pairs. A `uses:` starting
+      with the prefix fails, and the message names the replacement. The
+      default is the mise installer: the org's pin is one number, held in
+      setup-mise, and a repo pinning jdx/mise-action itself has quietly opted
+      out of that.
+    required: false
+    default: |
+      jdx/mise-action Merkleye/github-templates/.github/actions/setup-mise@main
+
+runs:
+  using: composite
+  steps:
+    - name: Install actionlint
+      if: inputs.actionlint == 'true'
+      shell: bash
+      env:
+        ACTIONLINT_VERSION: ${{ inputs.actionlint-version }}
+        RUNNER_TEMP_DIR: ${{ runner.temp }}
+      run: |
+        set -euo pipefail
+        curl -sSfL -o "${RUNNER_TEMP_DIR}/actionlint.tar.gz" \
+          "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+        tar -xzf "${RUNNER_TEMP_DIR}/actionlint.tar.gz" -C "${RUNNER_TEMP_DIR}" actionlint
+        "${RUNNER_TEMP_DIR}/actionlint" --version
+
+    # Unquoted on purpose: the globs are expanded here, and actionlint takes
+    # the resulting file list.
+    - name: actionlint
+      if: inputs.actionlint == 'true'
+      shell: bash
+      env:
+        PATHS: ${{ inputs.actionlint-paths }}
+        RUNNER_TEMP_DIR: ${{ runner.temp }}
+      run: |
+        set -euo pipefail
+        # shellcheck disable=SC2086
+        "${RUNNER_TEMP_DIR}/actionlint" -color ${PATHS}
+
+    - name: Check action references
+      shell: bash
+      env:
+        SCAN_PATHS: ${{ inputs.scan-paths }}
+        ALLOW_TAGS: ${{ inputs.allow-tags }}
+        BANNED: ${{ inputs.banned-actions }}
+        REQUIRE_SHA_PINS: ${{ inputs.require-sha-pins }}
+      run: |
+        set -euo pipefail
+        python3 "${GITHUB_ACTION_PATH}/check-workflows.py" \
+          --paths "${SCAN_PATHS}" \
+          --allow-tags "${ALLOW_TAGS}" \
+          --banned "${BANNED}" \
+          --require-sha-pins "${REQUIRE_SHA_PINS}"

@@ -26,6 +26,7 @@ contract run. Those belong next to the code they test.
 | [`ghcr-pr-preview-image.yml`](.github/workflows/ghcr-pr-preview-image.yml) | Builds and pushes per-PR container images to GHCR under `pr-<n>` tags. |
 | [`ghcr-pr-preview-cleanup.yml`](.github/workflows/ghcr-pr-preview-cleanup.yml) | Deletes those preview package versions when the PR closes. |
 | [`container-ci.yml`](.github/workflows/container-ci.yml) | Builds every image a repo ships and pushes nothing — the container-integrity gate. |
+| [`workflow-lint.yml`](.github/workflows/workflow-lint.yml) | actionlint, plus the org's `uses:` rules: SHA-pinned actions and no direct `jdx/mise-action`. |
 | [`semantic-release.yml`](.github/workflows/semantic-release.yml) | Assembles the environment semantic-release needs and runs it, container builder and syft included. |
 
 ### Composite actions — `uses:` at the step level
@@ -36,6 +37,7 @@ contract run. Those belong next to the code they test.
 | [`cf-pages-deploy`](.github/actions/cf-pages-deploy) | Publishes a built directory to Cloudflare Pages, production or per-PR preview, with the sticky preview comment. |
 | [`cf-pages-prune`](.github/actions/cf-pages-prune) | Deletes Cloudflare Pages preview deployments by branch alias or age. Never touches production. |
 | [`resolve-builder`](.github/actions/resolve-builder) | Turns `auto` into `docker` or `blacksmith` from the runner label. One definition of `auto` for the three workflows that build images. |
+| [`lint-workflows`](.github/actions/lint-workflows) | The step-level half of `workflow-lint.yml`, for a repo that already has a lint job to hang it on. |
 
 Ready-to-paste caller workflows live in [`examples/`](examples), including
 [`mise-tasks.yml`](examples/mise-tasks.yml) for the step-level `setup-mise`
@@ -144,9 +146,47 @@ wins.
 `auto` logs which builder it picked. A wrong guess is otherwise invisible
 until a build behaves oddly for reasons nobody can see in the YAML.
 
+### Enforcing the conventions
+
+A convention nobody checks is a convention that decays. `setup-mise` existed
+for a while before anyone noticed that `design` still pinned
+`jdx/mise-action` at five call sites and `merkleye-website` at one — they
+agreed with the shared pin at the time, so nothing looked wrong, and they
+would have disagreed the first time a Renovate PR landed in one repo and not
+the other.
+
+[`workflow-lint.yml`](.github/workflows/workflow-lint.yml) is the check.
+One job, no inputs in the common case:
+
+```yaml
+jobs:
+  lint:
+    permissions:
+      contents: read
+    uses: Merkleye/github-templates/.github/workflows/workflow-lint.yml@main
+```
+
+It runs actionlint over the repo's workflows, then walks both
+`.github/workflows` and `.github/actions` — composite actions are where the
+last unpinned references tend to hide — and fails on two things:
+
+- a third-party action not pinned to a full commit SHA
+- a `uses:` that names an action the org wraps, naming the wrapper to use
+  instead
+
+Both rules are inputs, so a repo with a real exception declares it in its own
+caller where a reviewer sees it, rather than being unable to adopt the check
+at all. `examples/workflow-lint.yml` shows both overrides. Note they replace
+the defaults rather than adding to them.
+
+The wrapper itself is exempt automatically: `setup-mise` exists precisely to
+reference `jdx/mise-action`, and a rule that forbids its own implementation
+is a rule nobody can satisfy. That is derived from the replacement path, not
+configured.
+
 ### Why this repository is public
 
-It holds workflow YAML, one bash script and this README — no secrets, no
+It holds workflow YAML, two small scripts and this README — no secrets, no
 credentials, nothing proprietary.
 
 It is public because it has to be. A **public** repository cannot consume
@@ -220,9 +260,11 @@ always read from the same commit rather than a mix.
 ## Conventions this repo holds itself to
 
 - **Every third-party action is pinned to a full commit SHA**, with the human
-  version in a trailing comment. `scripts/check-action-pins.py` fails CI
-  otherwise. A mutable tag here would be a mutable tag in every repo that
-  calls these workflows.
+  version in a trailing comment. A mutable tag here would be a mutable tag in
+  every repo that calls these workflows.
+- **`jdx/mise-action` is referenced only by `setup-mise`.** One pin for the
+  org, moved by one Renovate PR. A repo holding its own copy has opted out of
+  that without saying so — see "Enforcing the conventions" below.
 - **Least privilege.** Workflows declare `permissions: {}` at the top and each
   job asks for exactly what it needs. Callers do the same.
 - **No PR code runs with write scope.** The container preview refuses to

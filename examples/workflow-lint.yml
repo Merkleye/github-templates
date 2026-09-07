@@ -1,0 +1,44 @@
+# .github/workflows/workflow-lint.yml — the org's `uses:` conventions, checked
+# on every PR. Every repo should have this; it is the only thing that keeps
+# "one mise pin for the whole org" true without someone re-auditing by hand.
+name: Workflow lint
+
+on:
+  pull_request:
+    # Only when the workflows themselves change. The rules are about YAML, and
+    # a PR that touches no YAML cannot break them.
+    paths:
+      - .github/**
+
+permissions: {}
+
+jobs:
+  lint:
+    permissions:
+      contents: read
+    uses: Merkleye/github-templates/.github/workflows/workflow-lint.yml@main
+
+# That is the whole file. The defaults are the org conventions: actionlint
+# over .github/workflows/*.yml, every third-party action pinned to a commit
+# SHA, and jdx/mise-action reachable only through setup-mise.
+#
+# A repo with a genuine exception declares it here, where a reviewer sees it,
+# rather than being unable to adopt the check:
+#
+#   with:
+#     # kubernetes/* publishes no SHA-addressable releases (see issue #123).
+#     allow-tags: |
+#       Merkleye/github-templates/
+#       useblacksmith/
+#       kubernetes/
+#
+# Adding a second wrapped action is the same shape — the replacement after the
+# space is what the failure message tells the author to use:
+#
+#   with:
+#     banned-actions: |
+#       jdx/mise-action Merkleye/github-templates/.github/actions/setup-mise@main
+#       docker/login-action Merkleye/github-templates/.github/actions/registry-login@main
+#
+# Note that `allow-tags` and `banned-actions` replace the defaults rather than
+# adding to them, so an override has to repeat the entries it still wants.
