@@ -1,0 +1,55 @@
+# .github/workflows/ci.yml (excerpt)
+#
+# The shape every Merkleye repo repeats once it drives its toolchain from
+# mise.toml: check out, install the pinned toolchain through the shared
+# action, then run the repo's own tasks by name.
+#
+# There is deliberately no reusable workflow for this. The repeatable part is
+# the installer, which `setup-mise` already is; the tasks themselves are
+# whatever the repo defines, and a template that only forwards a task list
+# would add a hop without removing a copy.
+name: CI
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read # checkout
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # One pinned jdx/mise-action for the whole org. Not the raw action:
+      # every workflow in every repo starts with this step, and pinning it
+      # per file is how two of them ended up on different commits.
+      - uses: Merkleye/github-templates/.github/actions/setup-mise@main
+
+      # `mise run <task>`, not the underlying command. The task is defined
+      # once in mise.toml (directly, or wrapping a Makefile target) and a
+      # contributor runs the identical thing locally -- so CI cannot drift
+      # from `make check` by a flag nobody noticed.
+      - run: mise run fmt-check
+      - run: mise run vet
+      - run: mise run test
+
+  # A task that is slow, or that reads a different set of secrets, earns its
+  # own job so a failure reads as itself rather than folding into the check
+  # above. Same two setup steps; that is the whole duplication, and it is
+  # cheaper than a template.
+  vulnerabilities:
+    name: Vulnerabilities
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read # checkout
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: Merkleye/github-templates/.github/actions/setup-mise@main
+      - run: mise run govulncheck

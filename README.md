@@ -35,7 +35,9 @@ contract run. Those belong next to the code they test.
 | [`cf-pages-deploy`](.github/actions/cf-pages-deploy) | Publishes a built directory to Cloudflare Pages, production or per-PR preview, with the sticky preview comment. |
 | [`cf-pages-prune`](.github/actions/cf-pages-prune) | Deletes Cloudflare Pages preview deployments by branch alias or age. Never touches production. |
 
-Ready-to-paste caller workflows live in [`examples/`](examples).
+Ready-to-paste caller workflows live in [`examples/`](examples), including
+[`mise-tasks.yml`](examples/mise-tasks.yml) for the step-level `setup-mise`
+pattern.
 
 ## Using them
 
@@ -71,6 +73,44 @@ So adopt with `pull_request`, which runs from the PR's own branch and makes
 the adopting PR its own proof. Switch to `pull_request_target` afterwards if
 the repo wants the rules pinned to the base branch — nothing in this check
 executes PR code, so either is safe.
+
+### The mise convention
+
+Every Merkleye repo pins its toolchain in `mise.toml`, so every workflow in
+every repo starts with the same installer step. That step is
+[`setup-mise`](.github/actions/setup-mise) — one pinned `jdx/mise-action`
+for the whole org, bumped by one Renovate PR here instead of drifting per
+repo and per workflow. Use it in place of the raw action:
+
+```yaml
+- uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+- uses: Merkleye/github-templates/.github/actions/setup-mise@main
+- run: mise run test
+```
+
+The second half of the convention is that CI runs **`mise run <task>`**, not
+the command the task wraps. A repo that already has a `Makefile` keeps it —
+`mise.toml` wraps each target (`run = "make test"`) rather than restating it,
+so `make test` and `mise run test` are the same thing by construction and
+there is one definition of what the gate is. `merkleye` is that shape;
+`mcp-server` defines its tasks in `mise.toml` directly. Both are fine. What
+is not fine is a workflow inlining `gofmt -l .` next to a `fmt-check` target
+that has since grown an exclusion.
+
+There is no reusable workflow for this, deliberately. The repeatable part is
+the installer, and `setup-mise` is it; the task names belong to the repo, and
+a template that only forwarded a list of them would add a hop without
+removing a copy. `examples/mise-tasks.yml` is the pattern to paste.
+
+Two exceptions worth knowing before converting a lint step:
+
+- **`golangci-lint` stays on `golangci/golangci-lint-action`.** The release
+  pinned in `mise.toml` is itself built with an older Go than these modules
+  target and refuses to load a newer language version; the action fetches a
+  build that matches the runner. `mise run lint` stays for local use.
+- **A step that needs setup mise does not provide** — a `pip install` of a
+  library, a browser, a service container — keeps that setup in the workflow.
+  The task is still `mise run <task>`.
 
 ### Why this repository is public
 
