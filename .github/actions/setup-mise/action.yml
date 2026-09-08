@@ -11,7 +11,9 @@ description: >-
 # different mise-action commits.
 #
 # This wraps the toolchain *installer* only. What gets installed is still each
-# repo's own mise.toml — the template deliberately has no opinion about it.
+# repo's own mise.toml — the template deliberately has no opinion about it,
+# including for the tools only a release needs: those go in mise.release.toml
+# and are selected with `env: release`, not with an input per tool.
 
 inputs:
   version:
@@ -36,10 +38,30 @@ inputs:
     description: Directory containing mise.toml, if not the repository root.
     required: false
     default: ""
+  env:
+    description: >-
+      mise config environment (MISE_ENV). `release` loads mise.release.toml on
+      top of mise.toml, which is where a repo puts the tools only a release
+      needs -- syft, cosign -- so they are pinned beside the rest of the
+      toolchain instead of being installed by a workflow input, and a PR run
+      never pays for them. Empty leaves MISE_ENV alone.
+    required: false
+    default: ""
 
 runs:
   using: composite
   steps:
+    # Exported rather than passed to the installer: the tools land on PATH as
+    # shims, which re-read the config every time they are invoked. A later
+    # `syft ...` step resolves only if MISE_ENV is still set for it, so it has
+    # to be the job's environment, not this step's.
+    - name: Select the mise config environment
+      if: inputs.env != ''
+      shell: bash
+      env:
+        MISE_ENV_INPUT: ${{ inputs.env }}
+      run: echo "MISE_ENV=${MISE_ENV_INPUT}" >> "$GITHUB_ENV"
+
     - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
       with:
         version: ${{ inputs.version }}

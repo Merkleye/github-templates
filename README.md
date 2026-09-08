@@ -27,13 +27,13 @@ contract run. Those belong next to the code they test.
 | [`ghcr-pr-preview-cleanup.yml`](.github/workflows/ghcr-pr-preview-cleanup.yml) | Deletes those preview package versions when the PR closes. |
 | [`container-ci.yml`](.github/workflows/container-ci.yml) | Builds every image a repo ships and pushes nothing — the container-integrity gate. |
 | [`workflow-lint.yml`](.github/workflows/workflow-lint.yml) | actionlint, plus the org's `uses:` rules: SHA-pinned actions and no direct `jdx/mise-action`. |
-| [`semantic-release.yml`](.github/workflows/semantic-release.yml) | Assembles the environment semantic-release needs and runs it, container builder and syft included. |
+| [`semantic-release.yml`](.github/workflows/semantic-release.yml) | Assembles the environment semantic-release needs and runs it, container builder and registry login included. |
 
 ### Composite actions — `uses:` at the step level
 
 | Action | What it does |
 | --- | --- |
-| [`setup-mise`](.github/actions/setup-mise) | Installs the toolchain pinned in the calling repo's `mise.toml`. One pin of `jdx/mise-action` for the whole org. |
+| [`setup-mise`](.github/actions/setup-mise) | Installs the toolchain pinned in the calling repo's `mise.toml`, optionally in a named mise environment. One pin of `jdx/mise-action` for the whole org. |
 | [`cf-pages-deploy`](.github/actions/cf-pages-deploy) | Publishes a built directory to Cloudflare Pages, production or per-PR preview, with the sticky preview comment. |
 | [`cf-pages-prune`](.github/actions/cf-pages-prune) | Deletes Cloudflare Pages preview deployments by branch alias or age. Never touches production. |
 | [`resolve-builder`](.github/actions/resolve-builder) | Turns `auto` into `docker` or `blacksmith` from the runner label. One definition of `auto` for the three workflows that build images. |
@@ -105,6 +105,22 @@ There is no reusable workflow for this, deliberately. The repeatable part is
 the installer, and `setup-mise` is it; the task names belong to the repo, and
 a template that only forwarded a list of them would add a hop without
 removing a copy. `examples/mise-tasks.yml` is the pattern to paste.
+
+A tool that only one kind of run needs still belongs in mise, not in a
+workflow input. `mise.release.toml` is loaded on top of `mise.toml` when
+`MISE_ENV=release`, which is what `semantic-release.yml` sets by default:
+
+```toml
+# mise.release.toml -- tools only a release needs
+[tools]
+syft = "1"
+```
+
+`setup-mise` takes the same thing as `env:` for a step-level caller. The point
+is that the version lives with the rest of the toolchain, a contributor can
+run the release steps locally by exporting the same variable, and a PR run
+does not install a tool it never invokes. An `install-<tool>: true` input
+would have bought none of that and would have needed a new input per tool.
 
 Two exceptions worth knowing before converting a lint step:
 
@@ -278,16 +294,19 @@ always read from the same commit rather than a mix.
 
 - `useblacksmith/*` actions are referenced by major tag, not SHA. Blacksmith
   does not publish SHA-addressable releases that stay valid across runner
-  image updates. `scripts/check-action-pins.py` allowlists that prefix; the
-  allowlist is the record of the exception.
+  image updates. `lint-workflows`' `allow-tags` default carries that prefix;
+  the allowlist is the record of the exception.
 - The Cloudflare preview templates cover cleanup, prune and deploy but not
   the build, because no two repos build the same way. If a third static site
   appears with the same Astro shape as the others, a `build-astro-site`
   action is the right next addition.
 - `semantic-release.yml` handles the environment, not the release config.
-  It now assembles the container half of that environment too — builder,
-  registry login, syft — but what gets built, tagged and attached still lives
-  in each repo's `.releaserc` exec plugin and its `scripts/release-image.sh`.
+  It now assembles the container half of that environment too — builder and
+  registry login — but what gets built, tagged and attached still lives in
+  each repo's `.releaserc` exec plugin and its `scripts/release-image.sh`.
+  `container-platforms` reaches those scripts as `$CONTAINER_PLATFORMS`, so
+  the platform list at least is the caller's to set rather than a constant
+  buried in each script.
   Those scripts are near-identical in `merkleye`, `certspotter` and
   `dnstwist`; a shared one is the obvious next extraction, and it is a script
   rather than a workflow, so it wants an `sh` file in this repo and a

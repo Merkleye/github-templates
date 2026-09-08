@@ -14,8 +14,12 @@ name: semantic-release
 #     protection or reach a second repository (the default GITHUB_TOKEN can
 #     do neither), plus the App's bot identity on the release commit
 #   - optionally, an .npmrc for publishing to a registry
-#   - optionally, a container builder, a registry login and the syft CLI, for
-#     the repos whose release also builds and pushes an image
+#   - optionally, a container builder and a registry login, for the repos
+#     whose release also builds and pushes an image
+#
+# What it deliberately does not assemble is a tool. A release that needs syft
+# or cosign declares it in mise.release.toml and gets it from the same
+# installer as the rest of the toolchain — see `mise-env` below.
 #
 # The container half is here rather than in a release template of its own
 # because everything around it — the full-history checkout, the App token, the
@@ -93,14 +97,14 @@ on:
         default: ghcr.io
       container-platforms:
         description: >-
-          Architectures to install QEMU emulation for, e.g. `arm64`. Empty
-          skips QEMU, which is right for a release that publishes only the
-          runner's own architecture. This is the emulation list, not the
-          build's `--platform` — the release script still decides what it
-          builds.
+          Platforms the release publishes. Exported to the release script as
+          CONTAINER_PLATFORMS and used to register QEMU, so one list decides
+          both what is built and what can execute. The default is the pair an
+          OCI image is expected to ship; narrow it only for an artifact that
+          genuinely is single-architecture.
         required: false
         type: string
-        default: ""
+        default: linux/amd64,linux/arm64
       container-builder:
         description: >-
           `auto`, `docker`, or `blacksmith`. `auto` reads the runner label,
@@ -109,15 +113,17 @@ on:
         required: false
         type: string
         default: auto
-      install-syft:
+      mise-env:
         description: >-
-          Put the syft CLI on PATH. Repos that attach an SBOM generate it from
-          inside their release script, per image and per platform, once the
-          image is actually built — so what they need here is the binary, not
-          a scanning action that would run at the wrong moment.
+          mise config environment for the job (MISE_ENV). `release` loads
+          mise.release.toml on top of mise.toml, which is where the tools only
+          a release needs belong — syft for an SBOM, cosign for a signature.
+          Pinning them there rather than installing them from an action means
+          one place decides the version, a contributor can run the release
+          steps locally, and a PR run never pays for them.
         required: false
-        type: boolean
-        default: false
+        type: string
+        default: release
       install-command:
         description: Command that installs the release tooling.
         required: false
@@ -213,6 +219,8 @@ jobs:
           git config user.email "${bot_id}+${APP_SLUG}[bot]@users.noreply.github.com"
 
       - uses: Merkleye/github-templates/.github/actions/setup-mise@main
+        with:
+          env: ${{ inputs.mise-env }}
 
       # Not managing the Node version — mise already put Node on PATH from
       # mise.toml. This only writes the .npmrc that @semantic-release/npm and
@@ -234,6 +242,9 @@ jobs:
           builder: ${{ inputs.container-builder }}
           runs-on: ${{ inputs.runs-on }}
 
+      # Registering the runner's own architecture is a no-op, so the publish
+      # list can be passed straight through instead of maintaining a second
+      # list of just the emulated half.
       - name: Set up QEMU
         if: inputs.containers && inputs.container-platforms != ''
         uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
@@ -259,19 +270,22 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install syft
-        if: inputs.install-syft
-        uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
-
       - name: Install release tooling
         run: ${{ inputs.install-command }}
 
       - name: Pre-release checks
         if: inputs.pre-release-command != ''
+        env:
+          CONTAINER_PLATFORMS: ${{ inputs.container-platforms }}
         run: ${{ inputs.pre-release-command }}
 
+      # CONTAINER_PLATFORMS reaches the repo's release script through
+      # semantic-release's exec plugin: the caller names the platforms once,
+      # in the workflow, instead of the workflow and the script each holding
+      # their own list and agreeing until one of them is edited.
       - name: Run semantic-release
         env:
+          CONTAINER_PLATFORMS: ${{ inputs.container-platforms }}
           GITHUB_TOKEN: ${{ steps.token.outputs.token }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN != '' && secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}
         run: npx semantic-release ${{ inputs.dry-run && '--dry-run' || '' }}

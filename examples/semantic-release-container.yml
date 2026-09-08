@@ -1,15 +1,20 @@
-# .github/workflows/release.yml — for a repo whose release builds and pushes
-# a container image and attaches an SBOM to the GitHub Release.
+# .github/workflows/release.yml — for a repo whose release builds and pushes a
+# container image and attaches an SBOM to the GitHub Release.
 #
-# What actually builds the image is the repo's own `.releaserc`, through
-# @semantic-release/exec's prepareCmd calling scripts/release-image.sh. That
-# script is where the tags, the platforms and the SBOM live, because they are
-# decisions about this artifact. The template's job is only to make sure the
-# things that script shells out to — a builder, an authenticated registry,
-# syft — exist by the time it runs.
+# The image itself is built by the repo's own `.releaserc`, through
+# @semantic-release/exec calling scripts/release-image.sh. Tags and SBOM
+# layout are decisions about the artifact and live there; the template only
+# makes sure a builder and an authenticated registry exist by the time that
+# script runs.
+#
+# syft is not an input here. It goes in mise.release.toml beside the rest of
+# the toolchain, and `mise-env: release` (the default) is what loads it:
+#
+#   # mise.release.toml — tools only a release needs
+#   [tools]
+#   syft = "1"
 name: Release
 
-# Manual: a release is a deliberate act, not a side effect of every merge.
 on:
   workflow_dispatch:
 
@@ -23,11 +28,9 @@ permissions: {}
 
 jobs:
   release:
-    # Guards against a dispatch fired against the wrong ref.
     if: github.ref == 'refs/heads/main'
-    # A caller must grant at least what the called job asks for -- GitHub lets
-    # a called workflow narrow the token, never widen it. `packages: write` is
-    # what pushes the image.
+    # A caller must grant at least what the called job asks for — GitHub lets
+    # a called workflow narrow the token, never widen it.
     permissions:
       contents: write
       packages: write
@@ -37,16 +40,16 @@ jobs:
       # the default GITHUB_TOKEN cannot do.
       app-token: true
       containers: true
-      # QEMU for arm64 only: the runner is amd64 and provides that natively.
-      container-platforms: arm64
-      install-syft: true
     secrets:
       APP_ID: ${{ secrets.APP_ID }}
       APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
 
-# `container-registry` defaults to ghcr.io and `container-builder` to `auto`,
-# which resolves from `runs-on` — so a Blacksmith release is the same file
-# with one line added:
+# Everything else is defaulted: ghcr.io, `builder: auto` (resolved from
+# `runs-on`), and `container-platforms: linux/amd64,linux/arm64` — reachable
+# in the release script as $CONTAINER_PLATFORMS, so the workflow and the
+# script cannot disagree about what ships.
+#
+# A Blacksmith release is this file with one line added:
 #
 #   with:
 #     runs-on: blacksmith-2vcpu-ubuntu-2404
