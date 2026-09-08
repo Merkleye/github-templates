@@ -311,6 +311,25 @@ always read from the same commit rather than a mix.
   `dnstwist`; a shared one is the obvious next extraction, and it is a script
   rather than a workflow, so it wants an `sh` file in this repo and a
   `curl`-free way to reach it. That is the part not yet designed.
+- **Renovate and `mise.release.toml` is unconfirmed.** The mise manager's
+  default file patterns cover `mise.toml` and `mise/config.toml`; whether an
+  `MISE_ENV`-scoped `mise.<env>.toml` is matched has not been checked. If it
+  is not, the pin in `mise.release.toml` is the one tool version in the org
+  nobody is bumping, and `Merkleye/renovate-config` needs the pattern added.
+  Check this before a second tool moves there.
+- **actionlint rejects a Blacksmith runner label** unless the repo tells it
+  the label exists. A repo on `blacksmith-*` runners that adopts
+  `workflow-lint.yml` needs `.github/actionlint.yaml`, which actionlint picks
+  up on its own:
+
+  ```yaml
+  self-hosted-runner:
+    labels:
+      - blacksmith-2vcpu-ubuntu-2404
+  ```
+
+  That file is the repo's, not the template's — the label set is a fact about
+  the repo's runners.
 - `container-ci.yml` builds and throws the image away. It does not scan it,
   test it, or check that it starts. `merkleye`'s perf suite runs the dnstwist
   sidecar for real, but that is a repo-specific job, not a template. If a
