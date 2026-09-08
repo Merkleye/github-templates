@@ -167,17 +167,26 @@ faithful answer: BuildKit scans each platform from inside its own build, where
 a post-hoc scan of a multi-arch manifest list resolves to whichever platform
 the runner happens to be and silently describes half of what shipped.
 
-The SBOM is an attestation on the image in the registry rather than a file on
-the GitHub Release. Read one with:
+The SBOM lands in two places, from one source. It is an attestation on the
+image, which is how it travels wherever the image is pulled:
 
 ```
 docker buildx imagetools inspect ghcr.io/merkleye/dnstwist:v1.0.0 \
   --format '{{ json .SBOM }}'
 ```
 
-That is a real change for anyone who was downloading `*.spdx.json` off a
-release page; the tradeoff is that the SBOM now travels with the image
-wherever it is pulled, instead of living next to it.
+and the build reads that attestation straight back out, one file per platform,
+into `sbom/` — which the repo's `@semantic-release/github` assets glob uploads,
+so a release page still has a `*.spdx.json` to download without a registry
+client:
+
+```json
+["@semantic-release/github", { "assets": [{ "path": "sbom/*.spdx.json" }] }]
+```
+
+Read back rather than generated a second time, so the file and the attestation
+cannot describe different things. `prepare` runs before `publish`, so the files
+exist by the time that plugin looks.
 
 The workflow cannot run the build itself. It has to happen inside
 semantic-release's `prepare` phase: a failure there aborts before the tag and

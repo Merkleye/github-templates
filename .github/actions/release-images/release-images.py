@@ -31,24 +31,32 @@ built, from inside the build, where a post-hoc scan of a multi-arch manifest
 list resolves to whichever platform the runner happens to be and silently
 describes half of what was published.
 
-The SBOM ships as an attestation attached to the image in the registry, not as
-a file in the workspace. Read one with:
+The SBOM ships as an attestation attached to the image, and is also written
+back out per platform into MERKLEYE_SBOM_DIR so the repo's
+@semantic-release/github `assets` glob uploads it to the Release. Both, not
+either: the attestation travels with the image wherever it is pulled, and the
+file is what someone auditing a release downloads without a registry client.
 
-    docker buildx imagetools inspect <ref> --format '{{ json .SBOM }}'
+The file is read back off the pushed image rather than produced separately, so
+the two cannot describe different things. prepare runs before publish, so the
+files exist by the time that plugin looks.
 
-Environment, all set by the release-images action:
+Environment, all set by the release-images action except MERKLEYE_SBOM_DIR:
   MERKLEYE_IMAGES       required. JSON array of {image, context, file}, the
                         same shape container-ci.yml and the preview workflow
                         take, so a repo declares its image set once.
   MERKLEYE_REGISTRY     registry and namespace. Defaults to
                         ghcr.io/<owner of GITHUB_REPOSITORY>.
   CONTAINER_PLATFORMS   defaults to linux/amd64,linux/arm64.
+  MERKLEYE_SBOM_DIR     where the SBOM files are written. Defaults to sbom/,
+                        which is what the repos' assets glob names.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import pathlib
 import shlex
 import subprocess
 import sys
@@ -56,6 +64,7 @@ from datetime import datetime, timezone
 from typing import NoReturn
 
 DEFAULT_PLATFORMS = "linux/amd64,linux/arm64"
+DEFAULT_SBOM_DIR = "sbom"
 REQUIRED_KEYS = ("image", "context", "file")
 
 
@@ -161,6 +170,51 @@ def oci_build_args(version: str, dry_run: bool) -> dict[str, str]:
     }
 
 
+def spdx_documents(payload: dict) -> dict:
+    """Map platform -> SPDX document, from either shape imagetools returns.
+
+    A single-platform image reports the SBOM struct directly; a multi-platform
+    one reports a map keyed by platform. Both are handled rather than one
+    assumed, because the shape belongs to buildx and a release is a bad place
+    to find out it changed. An unrecognised shape fails loudly, naming the keys
+    that were actually there.
+    """
+    if "SPDX" in payload:
+        return {"": payload["SPDX"]}
+    docs = {
+        platform: value["SPDX"]
+        for platform, value in payload.items()
+        if isinstance(value, dict) and "SPDX" in value
+    }
+    if not docs:
+        fail(
+            "no SPDX document in the image's SBOM attestation. imagetools "
+            f"reported: {sorted(payload)}"
+        )
+    return docs
+
+
+def write_sboms(ref: str, version: str, image: str, sbom_dir: pathlib.Path,
+                dry_run: bool) -> None:
+    """Read the SPDX attestations back off the pushed image, one file each."""
+    raw = run(
+        ["docker", "buildx", "imagetools", "inspect", f"{ref}:v{version}",
+         "--format", "{{ json .SBOM }}"],
+        dry_run=dry_run,
+        capture=True,
+    )
+    if dry_run:
+        print(f"+ (would write {sbom_dir}/{image}-<arch>.spdx.json per platform)")
+        return
+
+    for platform, document in spdx_documents(json.loads(raw)).items():
+        arch = platform.rsplit("/", 1)[-1]
+        name = f"{image}-{arch}.spdx.json" if arch else f"{image}.spdx.json"
+        out = sbom_dir / name
+        out.write_text(json.dumps(document, indent=2) + "\n")
+        print(f"wrote {out} ({out.stat().st_size} bytes)")
+
+
 def main() -> int:
     argv = sys.argv[1:]
 
@@ -193,11 +247,22 @@ def main() -> int:
     )
     oci = oci_build_args(version, dry_run)
 
+    sbom_dir = pathlib.Path(
+        os.environ.get("MERKLEYE_SBOM_DIR", "").strip() or DEFAULT_SBOM_DIR
+    )
+    if not dry_run:
+        sbom_dir.mkdir(parents=True, exist_ok=True)
+
     for entry in images:
         image = entry["image"]
         ref = f"{reg}/{image}"
+
         print(f"::group::Build + push {image} (with SBOM attestation)")
         run(build_argv(ref, version, major, platforms, entry, oci), dry_run=dry_run)
+        print("::endgroup::")
+
+        print(f"::group::SBOM files for {image}")
+        write_sboms(ref, version, image, sbom_dir, dry_run)
         print("::endgroup::")
 
     return 0

@@ -1,5 +1,5 @@
 # .github/workflows/release.yml — for a repo whose release builds and pushes a
-# container image with an SBOM attestation per image.
+# container image with an SBOM per image, on the image and on the release.
 #
 # The build comes from the template too, via `images`. Each entry is built for
 # `container-platforms` and pushed as v1.2.3, v1 and latest — an exact pin plus
@@ -18,9 +18,14 @@
 # An SPDX SBOM per image per platform comes with the build, and there is no
 # input to turn it off — a published image without one is the gap. BuildKit
 # produces it during the build, so there is no tool to pin and nothing to add
-# to this file. It rides along as an attestation on the image:
+# here. It rides along as an attestation on the image:
 #
 #   docker buildx imagetools inspect <ref> --format '{{ json .SBOM }}'
+#
+# and is written back out to sbom/, which this repo's .releaserc uploads to the
+# Release so it is downloadable without a registry client:
+#
+#   ["@semantic-release/github", { "assets": [{ "path": "sbom/*.spdx.json" }] }]
 name: Release
 
 on:
