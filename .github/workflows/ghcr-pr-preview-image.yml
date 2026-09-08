@@ -43,11 +43,15 @@ on:
         default: pr-
       builder:
         description: >-
-          `docker` for docker/setup-buildx-action, or `blacksmith` for
-          useblacksmith/setup-docker-builder on a Blacksmith runner.
+          `auto`, `docker`, or `blacksmith`. `auto` reads the runner label,
+          same rule as container-ci.yml and semantic-release.yml: anything
+          containing `blacksmith` gets useblacksmith/*, everything else gets
+          docker/*. Set it explicitly to run the docker builder on a
+          Blacksmith runner, which is a legitimate combination — the runner
+          and the builder are separate choices.
         required: false
         type: string
-        default: docker
+        default: auto
       platforms:
         description: >-
           Target platforms, e.g. `linux/amd64,linux/arm64`. Empty builds for
@@ -86,6 +90,15 @@ jobs:
       group: pr-preview-publish-${{ github.event.pull_request.number }}-${{ matrix.image }}
       cancel-in-progress: true
     steps:
+      # One rule for `auto`, shared with container-ci.yml and
+      # semantic-release.yml — see .github/actions/resolve-builder.
+      - name: Resolve builder
+        id: builder
+        uses: Merkleye/github-templates/.github/actions/resolve-builder@main
+        with:
+          builder: ${{ inputs.builder }}
+          runs-on: ${{ inputs.runs-on }}
+
       - name: Derive preview context
         id: context
         env:
@@ -127,11 +140,11 @@ jobs:
         uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
 
       - name: Set up Buildx
-        if: inputs.builder != 'blacksmith'
+        if: steps.builder.outputs.builder == 'docker'
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Set up Blacksmith builder
-        if: inputs.builder == 'blacksmith'
+        if: steps.builder.outputs.builder == 'blacksmith'
         uses: useblacksmith/setup-docker-builder@9309da73a81f66976a6d750572e221508b1e2682 # v1
 
       - name: Log in to the registry
@@ -142,7 +155,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push (${{ matrix.image }})
-        if: inputs.builder != 'blacksmith'
+        if: steps.builder.outputs.builder == 'docker'
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: ${{ matrix.context }}
@@ -161,7 +174,7 @@ jobs:
             OCI_SOURCE=${{ github.server_url }}/${{ github.repository }}
 
       - name: Build and push (${{ matrix.image }}, Blacksmith)
-        if: inputs.builder == 'blacksmith'
+        if: steps.builder.outputs.builder == 'blacksmith'
         uses: useblacksmith/build-push-action@9b0579bbec7a6cad2f171596c57e7ac1e7658850 # v2
         with:
           context: ${{ matrix.context }}

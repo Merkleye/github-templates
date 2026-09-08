@@ -1,0 +1,12 @@
+[tools]
+actionlint = "1.7.7"
+
+[tasks."lint:actionlint"]
+description = "actionlint over the workflow files named as arguments."
+# A global-config task otherwise runs in the directory of the config that
+# defines it -- here the checked-out copy of *this* repo under _actions/,
+# where the repo being linted is nowhere in sight. {{cwd}} is the repo the job
+# checked out, and locally it is wherever the contributor is standing.
+dir = "{{cwd}}"
+# Arguments are appended: with none, actionlint finds .github/workflows itself.
+run = "actionlint -color"

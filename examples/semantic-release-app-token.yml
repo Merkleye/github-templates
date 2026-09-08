@@ -33,5 +33,5 @@ jobs:
         merkleye-website
       runs-on: blacksmith-2vcpu-ubuntu-2404
     secrets:
-      APP_ID: ${{ secrets.APP_ID }}
+      CLIENT_ID: ${{ secrets.CLIENT_ID }}
       APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}

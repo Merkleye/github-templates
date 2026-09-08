@@ -1,0 +1,138 @@
+name: Container build
+
+# Reusable: the container-integrity gate. Builds every image a repo ships,
+# from the same context and Containerfile the release publishes, and pushes
+# nothing.
+#
+# The point is that the build is *run*, not that the Containerfile parses. A
+# base image that vanished, an apt package that moved, a COPY of a file the
+# last commit renamed — none of those show up in a lint and all of them break
+# a release at the worst moment. This job is the cheapest place to find them.
+#
+# Nothing here needs a registry, a token or a fork guard: with `push: false`
+# the job has no write scope to misuse, so it runs on fork PRs exactly as it
+# does on internal ones.
+#
+# `images` is deliberately the same JSON shape ghcr-pr-preview-image.yml
+# takes, so a repo declares its image set once and the CI build, the PR
+# preview and the release all agree on what it ships.
+
+on:
+  workflow_call:
+    inputs:
+      images:
+        description: >-
+          JSON array of {image, context, file} objects, one per image to
+          build. Example:
+          [{"image":"dnstwist","context":".","file":"Containerfile"}]
+        required: true
+        type: string
+      runs-on:
+        description: >-
+          Runner label. `ubuntu-latest` for GitHub-hosted, a Blacksmith label
+          such as `blacksmith-2vcpu-ubuntu-2404`, or a self-hosted label such
+          as `self-hosted`. One label, not a JSON array — give a self-hosted
+          pool a single distinguishing label rather than AND-ing several.
+        required: false
+        type: string
+        default: ubuntu-latest
+      builder:
+        description: >-
+          `auto`, `docker`, or `blacksmith`. `auto` reads the runner label:
+          anything containing `blacksmith` gets useblacksmith/*, everything
+          else gets docker/*. Set it explicitly to run the docker builder on a
+          Blacksmith runner, which is a legitimate combination — the runner
+          and the builder are separate choices.
+        required: false
+        type: string
+        default: auto
+      platforms:
+        description: >-
+          Target platforms, e.g. `linux/amd64,linux/arm64`. Empty builds for
+          the runner's own architecture. A cross-architecture build here runs
+          under QEMU and costs several times the wall clock, so it is worth
+          asking whether the release build is the right place to catch an
+          arm64-only failure.
+        required: false
+        type: string
+        default: ""
+      cache:
+        description: >-
+          `gha` to read and write the GitHub Actions layer cache, `none` to
+          build cold. Ignored on the Blacksmith path, which caches layers on
+          its own sticky disk and gains nothing from a second cache.
+        required: false
+        type: string
+        default: gha
+      timeout-minutes:
+        description: Job timeout, per image.
+        required: false
+        type: number
+        default: 15
+
+permissions: {}
+
+jobs:
+  build:
+    name: Build ${{ matrix.image }}
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.images) }}
+    steps:
+      # One rule for `auto`, shared with ghcr-pr-preview-image.yml and
+      # semantic-release.yml — see .github/actions/resolve-builder.
+      - name: Resolve builder
+        id: builder
+        uses: Merkleye/github-templates/.github/actions/resolve-builder@main
+        with:
+          builder: ${{ inputs.builder }}
+          runs-on: ${{ inputs.runs-on }}
+
+      # persist-credentials: false — nothing here pushes to git, and the
+      # checked-out tree is fed straight to a container build.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Only when a cross-architecture build was asked for; a native build
+      # does not need the emulation layer.
+      - name: Set up QEMU
+        if: inputs.platforms != ''
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
+
+      - name: Set up Buildx
+        if: steps.builder.outputs.builder == 'docker'
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Set up Blacksmith builder
+        if: steps.builder.outputs.builder == 'blacksmith'
+        uses: useblacksmith/setup-docker-builder@9309da73a81f66976a6d750572e221508b1e2682 # v1
+
+      # Scoped per image: one shared cache key across a multi-image repo means
+      # each build evicts the previous one's layers and every build is cold.
+      - name: Build ${{ matrix.image }}
+        if: steps.builder.outputs.builder == 'docker'
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          push: false
+          platforms: ${{ inputs.platforms }}
+          tags: ${{ matrix.image }}:ci
+          cache-from: ${{ inputs.cache == 'gha' && format('type=gha,scope={0}', matrix.image) || '' }}
+          cache-to: ${{ inputs.cache == 'gha' && format('type=gha,mode=max,scope={0}', matrix.image) || '' }}
+
+      - name: Build ${{ matrix.image }} (Blacksmith)
+        if: steps.builder.outputs.builder == 'blacksmith'
+        uses: useblacksmith/build-push-action@9b0579bbec7a6cad2f171596c57e7ac1e7658850 # v2
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          push: false
+          platforms: ${{ inputs.platforms }}
+          tags: ${{ matrix.image }}:ci
