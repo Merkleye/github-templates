@@ -218,9 +218,6 @@ jobs:
           git config user.name "${APP_SLUG}[bot]"
           git config user.email "${bot_id}+${APP_SLUG}[bot]@users.noreply.github.com"
 
-      # @main, not the SHA Renovate pinned on main: the `env` input this line
-      # passes is added by this same commit, so no existing commit has a
-      # setup-mise that accepts it. See the PR discussion.
       - uses: Merkleye/github-templates/.github/actions/setup-mise@main
         with:
           env: ${{ inputs.mise-env }}

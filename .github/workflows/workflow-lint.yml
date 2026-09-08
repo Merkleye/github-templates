@@ -42,6 +42,13 @@ on:
         default: |
           .github/workflows
           .github/actions
+      require-main-refs:
+        description: >-
+          Newline-separated `uses:` prefixes that must name `@main` rather
+          than a commit. Empty by default.
+        required: false
+        type: string
+        default: ""
       require-sha-pins:
         description: Require every third-party action to name a 40-character commit SHA.
         required: false
@@ -85,6 +92,7 @@ jobs:
           actionlint: ${{ inputs.actionlint }}
           actionlint-paths: ${{ inputs.actionlint-paths }}
           scan-paths: ${{ inputs.scan-paths }}
+          require-main-refs: ${{ inputs.require-main-refs }}
           require-sha-pins: ${{ inputs.require-sha-pins }}
           allow-tags: ${{ inputs.allow-tags }}
           banned-actions: ${{ inputs.banned-actions }}

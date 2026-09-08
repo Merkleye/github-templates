@@ -7,6 +7,14 @@ Two rules, both configurable by the action's inputs:
     a supply-chain hole in a normal repo and an amplified one in a template
     repo, where it becomes a mutable tag in every consumer.
 
+  * Some references must name `@main` rather than a commit. That is the
+    inverse of the pin rule and applies to one case: a repo referring to its
+    own actions. A workflow and the composite actions it calls have to come
+    from the same commit, and a digest there could only ever name the
+    previous one -- so every merge would spawn a bot PR re-pinning the merge
+    before it. Off by default: a consuming repo pinning this repo at a SHA is
+    the documented way to opt out of automatic updates.
+
   * Some actions must not be referenced directly at all, because the org
     wraps them. `jdx/mise-action` is the standing case: wrapping it in
     `setup-mise` is what makes the pin one number for the whole org instead
@@ -86,11 +94,13 @@ def main() -> int:
     parser.add_argument("--allow-tags", default="")
     parser.add_argument("--banned", default="")
     parser.add_argument("--require-sha-pins", default="true")
+    parser.add_argument("--require-main-refs", default="")
     args = parser.parse_args()
 
     roots = [pathlib.Path(p) for p in parse_list(args.paths)]
     allow_tags = tuple(parse_list(args.allow_tags))
     banned = parse_banned(args.banned)
+    main_refs = tuple(parse_list(args.require_main_refs))
     require_pins = args.require_sha_pins.lower() == "true"
 
     files: list[pathlib.Path] = []
@@ -131,6 +141,16 @@ def main() -> int:
                     fix = f" — use {replacement} instead" if replacement else ""
                     problems.append(f"{path}:{line}: `{prefix}` must not be used directly{fix}")
                     continue
+
+            # Before the pin rule, and skipping past it: the two rules want
+            # opposite things of the same reference.
+            if any(ref.startswith(p) for p in main_refs):
+                if not ref.endswith("@main"):
+                    problems.append(
+                        f"{path}:{line}: `{ref}` is a self-reference and must be"
+                        " `@main`, not a pinned ref"
+                    )
+                continue
 
             if not require_pins:
                 continue

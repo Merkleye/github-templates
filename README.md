@@ -282,13 +282,21 @@ speculatively from the start.
 
 Reusable workflows reference this repo's own composite actions by full path
 at `@main`, self-referentially, so a workflow and the actions it calls are
-always read from the same commit rather than a mix.
+always read from the same commit rather than a mix. Those self-references are
+deliberately *not* pinned to a digest: a pin would only ever name the previous
+commit to this repo, so every merge would spawn a bot PR that re-pins the
+merge before it, with nothing gained. `renovate.json` disables updates for
+`Merkleye/github-templates`, and `lint-workflows`' `require-main-refs` fails
+CI if a self-reference drifts off `@main`.
 
 ## Conventions this repo holds itself to
 
 - **Every third-party action is pinned to a full commit SHA**, with the human
-  version in a trailing comment. A mutable tag here would be a mutable tag in
-  every repo that calls these workflows.
+  version in a trailing comment. `lint-workflows` fails CI otherwise. A
+  mutable tag here would be a mutable tag in every repo that calls these
+  workflows. This repo's references to itself are the exception and must stay
+  on `@main`; the same check enforces that direction too, through
+  `require-main-refs`.
 - **`jdx/mise-action` is referenced only by `setup-mise`.** One pin for the
   org, moved by one Renovate PR. A repo holding its own copy has opted out of
   that without saying so — see "Enforcing the conventions" below.

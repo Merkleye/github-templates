@@ -40,6 +40,14 @@ inputs:
     default: |
       .github/workflows
       .github/actions
+  require-main-refs:
+    description: >-
+      Newline-separated `uses:` prefixes that must name `@main` rather than a
+      commit -- the inverse of the pin rule, for a repo referring to its own
+      actions. Empty by default: pinning this repo at a SHA is how a consuming
+      repo opts out of automatic updates.
+    required: false
+    default: ""
   require-sha-pins:
     description: Require every third-party action to name a 40-character commit SHA.
     required: false
@@ -114,6 +122,7 @@ runs:
         SCAN_PATHS: ${{ inputs.scan-paths }}
         ALLOW_TAGS: ${{ inputs.allow-tags }}
         BANNED: ${{ inputs.banned-actions }}
+        REQUIRE_MAIN_REFS: ${{ inputs.require-main-refs }}
         REQUIRE_SHA_PINS: ${{ inputs.require-sha-pins }}
       run: |
         set -euo pipefail
@@ -121,4 +130,5 @@ runs:
           --paths "${SCAN_PATHS}" \
           --allow-tags "${ALLOW_TAGS}" \
           --banned "${BANNED}" \
+          --require-main-refs "${REQUIRE_MAIN_REFS}" \
           --require-sha-pins "${REQUIRE_SHA_PINS}"
