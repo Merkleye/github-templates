@@ -2,13 +2,21 @@
 # container image and attaches an SBOM to the GitHub Release.
 #
 # The image itself is built by the repo's own `.releaserc`, through
-# @semantic-release/exec calling scripts/release-image.sh. Tags and SBOM
-# layout are decisions about the artifact and live there; the template only
-# makes sure a builder and an authenticated registry exist by the time that
-# script runs.
+# @semantic-release/exec calling scripts/release-image.sh. Tags are a decision
+# about the artifact and live there; the template only makes sure a builder and
+# an authenticated registry exist by the time that script runs.
 #
-# syft is not an input here. It goes in mise.release.toml beside the rest of
-# the toolchain, and `mise-env: release` (the default) is what loads it:
+# The SBOM is the template's, because attaching an asset to the release
+# semantic-release just cut was the part every repo reimplemented. `sbom: true`
+# runs syft after the release and uploads the result. Scanning the pushed image
+# rather than the source tree is the point: the SBOM then describes the layers
+# a user pulls, base image included, not the tree they were built from. The
+# image does not exist until the prepare step has run, so the version goes in
+# as the `$RELEASE_VERSION` placeholder and is substituted once the tag exists.
+#
+# syft is still not an input. It goes in mise.release.toml beside the rest of
+# the toolchain, and `mise-env: release` (the default) is what loads it — the
+# SBOM step fails with these two lines if it is missing:
 #
 #   # mise.release.toml — tools only a release needs
 #   [tools]
@@ -40,6 +48,10 @@ jobs:
       # the default GITHUB_TOKEN cannot do.
       app-token: true
       containers: true
+      sbom: true
+      # Spelled out rather than ${{ github.repository }}: the org name is
+      # capitalised there and an OCI reference must be lowercase.
+      sbom-target: ghcr.io/merkleye/my-service:$RELEASE_VERSION
     secrets:
       CLIENT_ID: ${{ secrets.CLIENT_ID }}
       APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
