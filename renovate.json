@@ -1,6 +1,16 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "description": "Policy comes from Merkleye/renovate-config through org inheritance. This file only stops Renovate opening an onboarding PR. Keeping the action pins in this repo current is the whole point of letting Renovate near it -- a stale pin here is a stale pin in every repo that calls these workflows.",
-  "extends": ["config:recommended"],
-  "labels": ["dependencies"]
+  "extends": [
+    "local>Merkleye/renovate-config//org-inherited-config"
+  ],
+  "labels": ["dependencies"],
+  "packageRules": [
+    {
+      "description": "This repo's references to itself stay on @main. They are not a dependency -- they are one commit reading its own siblings, and a workflow must run the actions from the commit it was read from. Pinning them to a digest makes every merge here produce a Renovate PR that only re-pins the previous merge, forever.",
+      "matchDepNames": ["/^Merkleye\\/github-templates(/|$)/"],
+      "pinDigests": false,
+      "enabled": false
+    }
+  ]
 }
