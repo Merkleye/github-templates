@@ -19,9 +19,10 @@
 # semantic-release just cut was the part every repo reimplemented. `sbom: true`
 # runs syft after the release and uploads the result. Scanning the pushed image
 # rather than the source tree is the point: the SBOM then describes the layers
-# a user pulls, base image included, not the tree they were built from. The
-# image does not exist until the prepare step has run, so the version goes in
-# as the `$RELEASE_VERSION` placeholder and is substituted once the tag exists.
+# a user pulls, base image included, not the tree they were built from — and
+# `sbom-target: images` scans every image `images` declared, since the image
+# does not exist until the prepare step has run and one target cannot name
+# several images anyway.
 #
 # syft is still not an input. It goes in mise.release.toml beside the rest of
 # the toolchain, and `mise-env: release` (the default) is what loads it — the
@@ -61,9 +62,10 @@ jobs:
       # preview builds exactly what the release will build.
       images: '[{"image":"my-service","context":".","file":"Containerfile"}]'
       sbom: true
-      # Spelled out rather than ${{ github.repository }}: the org name is
-      # capitalised there and an OCI reference must be lowercase.
-      sbom-target: ghcr.io/merkleye/my-service:$RELEASE_VERSION
+      # One SBOM per image in `images`, scanned at the tag just published.
+      # A literal target would work for one image and quietly describe only
+      # the first of several.
+      sbom-target: images
     secrets:
       CLIENT_ID: ${{ secrets.CLIENT_ID }}
       APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}

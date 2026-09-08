@@ -174,14 +174,20 @@ on:
           right answer for a release whose artifact is the repo. A release that
           publishes an image should scan the image it just pushed, so that the
           SBOM describes the layers a user actually pulls rather than the tree
-          they were built from:
+          they were built from.
+
+          The literal value `images` is the way to say that: one SBOM per entry
+          in the `images` input, named after the image, scanned at the tag this
+          release just published. A release shipping three images needs three
+          SBOMs, and no single target can name them.
+
+          Anything else is a target passed to syft as written, with
+          `$RELEASE_TAG` (the tag semantic-release created, e.g. v1.4.0) and
+          `$RELEASE_VERSION` (the same without the leading `v`) substituted —
+          the version is not known until semantic-release has run, so a caller
+          cannot interpolate it:
 
             sbom-target: ghcr.io/merkleye/my-service:$RELEASE_VERSION
-
-          `$RELEASE_TAG` (the tag semantic-release created, e.g. v1.4.0) and
-          `$RELEASE_VERSION` (the same without the leading `v`) are substituted
-          literally — the version is not known until semantic-release has run,
-          so it cannot be interpolated by the caller.
         required: false
         type: string
         default: dir:.
@@ -194,7 +200,9 @@ on:
       sbom-file:
         description: >-
           Filename the SBOM is uploaded under. This is what a consumer sees on
-          the release page, so it should say which format it is in.
+          the release page, so it should say which format it is in. With
+          `sbom-target: images` only the extension is used, and each asset is
+          named after its image — sbom.spdx.json gives dnstwist.spdx.json.
         required: false
         type: string
         default: sbom.spdx.json
@@ -436,15 +444,40 @@ jobs:
             printf '\n[tools]\nsyft = "1"\n\n' >&2
             exit 1
           fi
-          # The version is only known now, so the caller writes a placeholder
-          # instead of an expression. Plain parameter substitution, not eval:
-          # the target is a caller-supplied string and never becomes shell.
-          version="${RELEASE_TAG#v}"
-          target="${SBOM_TARGET//\$RELEASE_TAG/$RELEASE_TAG}"
-          target="${target//\$RELEASE_VERSION/$version}"
           syft --version
-          echo "Scanning $target"
-          syft scan "$target" --output "$SBOM_FORMAT=$RUNNER_TEMP/$SBOM_FILE"
+
+          out="$RUNNER_TEMP/sbom"
+          mkdir -p "$out"
+
+          if [ "$SBOM_TARGET" = images ]; then
+            # One SBOM per published image. MERKLEYE_IMAGES and
+            # MERKLEYE_REGISTRY are on the environment because the
+            # release-images action put them there, so the images scanned here
+            # are by construction the images that were pushed.
+            if [ -z "${MERKLEYE_IMAGES:-}" ]; then
+              echo "sbom-target: images, but the images input is empty." >&2
+              exit 1
+            fi
+            # Only the extension of sbom-file survives; the name is the image.
+            suffix=".${SBOM_FILE#*.}"
+            # The same script that built them lists them, so the two cannot
+            # read the JSON differently.
+            python3 "$MERKLEYE_RELEASE_IMAGES" --list-images > "$RUNNER_TEMP/image-names"
+            while IFS= read -r image; do
+              echo "Scanning $MERKLEYE_REGISTRY/$image:$RELEASE_TAG"
+              syft scan "$MERKLEYE_REGISTRY/$image:$RELEASE_TAG" \
+                --output "$SBOM_FORMAT=$out/$image$suffix"
+            done < "$RUNNER_TEMP/image-names"
+          else
+            # The version is only known now, so the caller writes a placeholder
+            # instead of an expression. Plain parameter substitution, not eval:
+            # the target is a caller-supplied string and never becomes shell.
+            version="${RELEASE_TAG#v}"
+            target="${SBOM_TARGET//\$RELEASE_TAG/$RELEASE_TAG}"
+            target="${target//\$RELEASE_VERSION/$version}"
+            echo "Scanning $target"
+            syft scan "$target" --output "$SBOM_FORMAT=$out/$SBOM_FILE"
+          fi
 
       # --clobber so a re-run of a failed release replaces the half-uploaded
       # asset instead of erroring on the name already being taken.
@@ -453,5 +486,4 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           RELEASE_TAG: ${{ steps.released.outputs.tag }}
-          SBOM_FILE: ${{ inputs.sbom-file }}
-        run: gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/$SBOM_FILE" --clobber
+        run: gh release upload "$RELEASE_TAG" "$RUNNER_TEMP"/sbom/* --clobber

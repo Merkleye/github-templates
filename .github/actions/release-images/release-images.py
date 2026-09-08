@@ -155,10 +155,21 @@ def main() -> int:
         print(f"release-images: {len(images)} image(s) to publish: {names}")
         return 0
 
+    # The SBOM step reads the image list back through here rather than parsing
+    # MERKLEYE_IMAGES itself, so what gets scanned cannot diverge from what got
+    # built.
+    if "--list-images" in argv:
+        for entry in load_images():
+            print(entry["image"])
+        return 0
+
     dry_run = "--dry-run" in argv
-    positional = [arg for arg in argv if arg not in ("--dry-run", "--check")]
+    positional = [
+        arg for arg in argv
+        if arg not in ("--dry-run", "--check", "--list-images")
+    ]
     if len(positional) != 1:
-        fail("usage: release-images.py <version> [--dry-run] | --check")
+        fail("usage: release-images.py <version> [--dry-run] | --check | --list-images")
 
     version = positional[0].lstrip("v")
     major = version.split(".")[0]

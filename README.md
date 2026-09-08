@@ -139,7 +139,10 @@ its own plugins and to nothing else, so the workflow recovers the tag by
 diffing the local tag list across the run rather than guessing at "the latest
 release". `sbom-target` decides what gets scanned; a repo that publishes an
 image should point it at the pushed image, not `dir:.`, so that the SBOM
-covers the base layers too. See
+covers the base layers too. With `images` set, `sbom-target: images` does that
+for every image the release published at once — one asset per image, named
+after it — which is the only shape that works for a repo shipping more than
+one. See
 [`examples/semantic-release-container.yml`](examples/semantic-release-container.yml).
 
 ### The container release build
