@@ -1,22 +1,31 @@
 # .github/workflows/release.yml — for a repo whose release builds and pushes a
-# container image and attaches an SBOM to the GitHub Release.
+# container image and attaches an SBOM per image to the GitHub Release.
 #
-# The image itself is built by the repo's own `.releaserc`, through
-# @semantic-release/exec calling scripts/release-image.sh. Tags are a decision
-# about the artifact and live there; the template only makes sure a builder and
-# an authenticated registry exist by the time that script runs.
+# The build comes from the template too, via `images`. Each entry is built for
+# `container-platforms` and pushed as v1.2.3, v1 and latest — an exact pin plus
+# the two moving tags. The repo keeps one line of `.releaserc`, which is where
+# the build has to be invoked from:
 #
-# The SBOM is the template's, because attaching an asset to the release
-# semantic-release just cut was the part every repo reimplemented. `sbom: true`
-# runs syft after the release and uploads the result. Scanning the pushed image
-# rather than the source tree is the point: the SBOM then describes the layers
-# a user pulls, base image included, not the tree they were built from. The
-# image does not exist until the prepare step has run, so the version goes in
-# as the `$RELEASE_VERSION` placeholder and is substituted once the tag exists.
+#   ["@semantic-release/exec", {
+#     "prepareCmd": "python3 \"$MERKLEYE_RELEASE_IMAGES\" ${nextRelease.version}"
+#   }]
 #
-# syft is still not an input. It goes in mise.release.toml beside the rest of
+# In `prepare` and not in a step here because a build that fails in `prepare`
+# aborts before the tag and the Release exist. A build in a later step would
+# publish the release first and then fail, leaving a release that points at an
+# image nobody can pull.
+#
+# An SPDX SBOM per image per platform comes with the build, and there is no
+# input to turn it off — a published image without one is the gap. Scanning the
+# pushed image rather than the source tree is the point: the SBOM describes the
+# layers a user pulls, base image included. The files land in sbom/, which this
+# repo's .releaserc uploads:
+#
+#   ["@semantic-release/github", { "assets": [{ "path": "sbom/*.spdx.json" }] }]
+#
+# syft is not an input either. It goes in mise.release.toml beside the rest of
 # the toolchain, and `mise-env: release` (the default) is what loads it — the
-# SBOM step fails with these two lines if it is missing:
+# build fails with these two lines if it is missing:
 #
 #   # mise.release.toml — tools only a release needs
 #   [tools]
@@ -48,18 +57,17 @@ jobs:
       # the default GITHUB_TOKEN cannot do.
       app-token: true
       containers: true
-      sbom: true
-      # Spelled out rather than ${{ github.repository }}: the org name is
-      # capitalised there and an OCI reference must be lowercase.
-      sbom-target: ghcr.io/merkleye/my-service:$RELEASE_VERSION
+      # Same JSON the repo's ghcr-pr-preview-image.yml caller passes, so the
+      # preview builds exactly what the release will build.
+      images: '[{"image":"my-service","context":".","file":"Containerfile"}]'
     secrets:
       CLIENT_ID: ${{ secrets.CLIENT_ID }}
       APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
 
-# Everything else is defaulted: ghcr.io, `builder: auto` (resolved from
-# `runs-on`), and `container-platforms: linux/amd64,linux/arm64` — reachable
-# in the release script as $CONTAINER_PLATFORMS, so the workflow and the
-# script cannot disagree about what ships.
+# Everything else is defaulted: `builder: auto` (resolved from `runs-on`),
+# `container-platforms: linux/amd64,linux/arm64`, and a registry namespace of
+# ghcr.io/<owner> lowercased — derived from `container-registry`, so the
+# registry the job logs in to and the registry the tags name cannot drift.
 #
 # A Blacksmith release is this file with one line added:
 #
