@@ -142,6 +142,53 @@ image should point it at the pushed image, not `dir:.`, so that the SBOM
 covers the base layers too. See
 [`examples/semantic-release-container.yml`](examples/semantic-release-container.yml).
 
+### The container release build
+
+Three repos published an image from their release, and each did it with a copy
+of the same 60-line `scripts/release-image.sh` — identical once the image name
+was normalised. Two of the last five release failures came from that
+arrangement rather than from anything about releases: `git update-index
+--chmod=+x` writes the index and not the working tree, so the next commit
+touching the file recorded the on-disk `644` and silently dropped the bit, in
+two repos, on the same night.
+
+`images` replaces all three:
+
+```yaml
+with:
+  containers: true
+  images: '[{"image":"dnstwist","context":".","file":"Containerfile"}]'
+```
+
+Each image is built for `container-platforms` and pushed with three tags —
+`v1.2.3` pins an exact build, `v1` tracks the newest `1.x`, `latest` tracks the
+newest release. semantic-release only moves forward on a release branch, so
+overwriting the two moving tags is always correct. The JSON is the same shape
+`ghcr-pr-preview-image.yml` and `container-ci.yml` take, so a repo declares its
+image set once and the PR preview builds what the release will build.
+
+The workflow cannot run the build itself. It has to happen inside
+semantic-release's `prepare` phase: a failure there aborts before the tag and
+the GitHub Release exist, where a failure in a later workflow step would leave
+a published release pointing at an image that was never pushed. So the template
+puts the build on the job environment and the repo's release config invokes it:
+
+```json
+["@semantic-release/exec", {
+  "prepareCmd": "python3 \"$MERKLEYE_RELEASE_IMAGES\" ${nextRelease.version}"
+}]
+```
+
+Python, called through the interpreter, is the fix for the mode bit — there is
+no `+x` left to lose, and `python3` is on every runner here. `$MERKLEYE_RELEASE_IMAGES`
+points inside `$GITHUB_ACTION_PATH`, which is outside the workspace, so the
+script never enters a `docker build` context and never appears in `git status`
+during the release commit.
+
+Leaving `images` empty keeps the older arrangement: `containers: true` still
+assembles a builder, QEMU and a registry login, and the repo's own script does
+the build.
+
 This repo holds itself to the same rule. [`mise.toml`](mise.toml) pins
 `actionlint` and defines the `lint:actionlint` task that `lint-workflows`
 runs; the action loads that file as mise's *global* config, so a consuming
@@ -342,17 +389,14 @@ CI if a self-reference drifts off `@main`.
   the build, because no two repos build the same way. If a third static site
   appears with the same Astro shape as the others, a `build-astro-site`
   action is the right next addition.
-- `semantic-release.yml` handles the environment, not the release config.
-  It now assembles the container half of that environment too — builder and
-  registry login — but what gets built, tagged and attached still lives in
-  each repo's `.releaserc` exec plugin and its `scripts/release-image.sh`.
-  `container-platforms` reaches those scripts as `$CONTAINER_PLATFORMS`, so
-  the platform list at least is the caller's to set rather than a constant
-  buried in each script.
-  Those scripts are near-identical in `merkleye`, `certspotter` and
-  `dnstwist`; a shared one is the obvious next extraction, and it is a script
-  rather than a workflow, so it wants an `sh` file in this repo and a
-  `curl`-free way to reach it. That is the part not yet designed.
+- `semantic-release.yml` handles the environment, not the release config —
+  with one exception, the container build, which the `images` input now owns.
+  The three copies of `scripts/release-image.sh` in `merkleye`, `certspotter`
+  and `dnstwist` were identical once the image name was normalised, and the
+  fifth bug in a row to break a release was a lost `+x` bit on one of them.
+  What each repo still owns is the one line in `.releaserc` that invokes it —
+  unavoidable, because the build has to run inside semantic-release's own
+  prepare phase to abort the release before the tag exists.
 - **Renovate and `mise.release.toml` is unconfirmed.** The mise manager's
   default file patterns cover `mise.toml` and `mise/config.toml`; whether an
   `MISE_ENV`-scoped `mise.<env>.toml` is matched has not been checked. If it

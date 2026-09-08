@@ -1,0 +1,118 @@
+name: Release container images
+description: >-
+  Puts the org's container release build on the release job's environment, for
+  semantic-release's prepare step to invoke.
+
+# Why an action and not a step that runs the build.
+#
+# The build has to happen inside semantic-release's `prepare` phase. A failed
+# build there aborts the release before the tag and the GitHub Release exist;
+# a build in a later workflow step publishes the release first and then fails,
+# leaving a release that points at an image nobody can pull. So the workflow
+# cannot run the build — it can only make the build available to the release
+# config, which is what this action does.
+#
+# Why the environment and not a documented path.
+#
+# `$GITHUB_ACTION_PATH` is a runner-internal directory whose name includes the
+# ref this action was resolved at. A repo cannot hardcode it, and it is outside
+# `$GITHUB_WORKSPACE`, which is the property that matters: the script never
+# enters a `docker build` context and never shows up in `git status` during the
+# release commit.
+#
+# Why Python invoked through the interpreter.
+#
+# This replaced three copies of the same 60-line bash script, executed by path.
+# A script executed by path depends on its committed mode bit, and that bit is
+# quiet to lose — `git update-index --chmod=+x` writes the index and not the
+# working tree, so the next commit that touches the file records the on-disk
+# 644 and reverts it. That broke two releases. `python3 <file>` has no mode bit
+# to lose, and python3 is on every runner this org uses.
+
+inputs:
+  images:
+    description: >-
+      JSON array of {image, context, file} objects, one per image the release
+      publishes — the same shape ghcr-pr-preview-image.yml and container-ci.yml
+      take, so a repo declares its image set once. Example:
+      [{"image":"dnstwist","context":".","file":"Containerfile"}]
+    required: true
+  registry:
+    description: >-
+      Registry and namespace the images are pushed to, e.g. ghcr.io/merkleye.
+      Empty derives it from `registry-host` and the repository owner, which is
+      what every repo here wants.
+    required: false
+    default: ""
+  registry-host:
+    description: >-
+      Registry the derived default is built from. semantic-release.yml passes
+      the same value it logs in to, so the registry the job authenticates
+      against and the registry the tags name cannot drift apart.
+    required: false
+    default: ghcr.io
+  platforms:
+    description: >-
+      Platforms to publish, as a buildx --platform list. Passed by
+      semantic-release.yml from its own container-platforms input, so the
+      workflow that registers QEMU and the build that needs the emulation
+      cannot name different architectures.
+    required: false
+    default: ""
+
+outputs:
+  script:
+    description: >-
+      Absolute path to the script, the same value exported as
+      MERKLEYE_RELEASE_IMAGES. For a repo whose release config cannot read the
+      environment.
+    value: ${{ steps.export.outputs.script }}
+
+runs:
+  using: composite
+  steps:
+    - id: export
+      shell: bash
+      env:
+        IMAGES: ${{ inputs.images }}
+        REGISTRY: ${{ inputs.registry }}
+        REGISTRY_HOST: ${{ inputs.registry-host }}
+        PLATFORMS: ${{ inputs.platforms }}
+      run: |
+        set -euo pipefail
+
+        script="${GITHUB_ACTION_PATH}/release-images.py"
+        if [ ! -f "${script}" ]; then
+          echo "release-images: ${script} is missing" >&2
+          exit 1
+        fi
+
+        # JSON on one line: GITHUB_ENV is line-oriented, and a JSON document
+        # does not need the newlines a YAML block scalar leaves in it.
+        images="$(printf '%s' "${IMAGES}" | tr -d '\n')"
+
+        {
+          echo "MERKLEYE_RELEASE_IMAGES=${script}"
+          echo "MERKLEYE_IMAGES=${images}"
+        } >> "${GITHUB_ENV}"
+
+        # Resolved here rather than left to the script's own fallback, so the
+        # registry the job logged in to is the registry the tags name. A
+        # registry path is lowercase; an owner login is not.
+        registry="${REGISTRY}"
+        if [ -z "${registry}" ]; then
+          owner="$(printf '%s' "${GITHUB_REPOSITORY%%/*}" | tr '[:upper:]' '[:lower:]')"
+          registry="${REGISTRY_HOST%/}/${owner}"
+        fi
+        echo "MERKLEYE_REGISTRY=${registry}" >> "${GITHUB_ENV}"
+        echo "Publishing to ${registry}."
+        if [ -n "${PLATFORMS}" ]; then
+          echo "CONTAINER_PLATFORMS=${PLATFORMS}" >> "${GITHUB_ENV}"
+        fi
+
+        echo "script=${script}" >> "${GITHUB_OUTPUT}"
+
+        # Reject a malformed `images` here, while the job is still assembling
+        # itself. The same check inside the release would arrive after
+        # semantic-release had already analyzed commits and generated notes.
+        MERKLEYE_IMAGES="${images}" python3 "${script}" --check
