@@ -41,10 +41,10 @@ inputs:
   env:
     description: >-
       mise config environment (MISE_ENV). `release` loads mise.release.toml on
-      top of mise.toml, which is where a repo puts the tools only a release
-      needs -- syft, cosign -- so they are pinned beside the rest of the
-      toolchain instead of being installed by a workflow input, and a PR run
-      never pays for them. Empty leaves MISE_ENV alone.
+      top of mise.toml, which is where a repo puts a tool only a release needs
+      -- pinned beside the rest of the toolchain instead of installed by a
+      workflow input, so a PR run never pays for it. Empty leaves MISE_ENV
+      alone.
     required: false
     default: ""
 
@@ -53,7 +53,7 @@ runs:
   steps:
     # Exported rather than passed to the installer: the tools land on PATH as
     # shims, which re-read the config every time they are invoked. A later
-    # `syft ...` step resolves only if MISE_ENV is still set for it, so it has
+    # later tool step resolves only if MISE_ENV is still set for it, so it has
     # to be the job's environment, not this step's.
     - name: Select the mise config environment
       if: inputs.env != ''
