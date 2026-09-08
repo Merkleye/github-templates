@@ -115,24 +115,19 @@ holds — the task is the repo's, and the workflow calls it by name.
 
 A tool that only one kind of run needs still belongs in mise, not in a
 workflow input. `mise.release.toml` is loaded on top of `mise.toml` when
-`MISE_ENV=release`, which is what `semantic-release.yml` sets by default:
+`MISE_ENV=release`, which `semantic-release.yml` sets by default and
+`setup-mise` takes as `env:` for a step-level caller. The version then lives
+with the rest of the toolchain, a contributor reproduces the release step by
+exporting the same variable, and a PR run never installs a tool it does not
+invoke — none of which an `install-<tool>: true` input per tool would have
+bought.
 
-```toml
-# mise.release.toml -- tools only a release needs
-[tools]
-cosign = "2"
-```
-
-`setup-mise` takes the same thing as `env:` for a step-level caller. The point
-is that the version lives with the rest of the toolchain, a contributor can
-run the release steps locally by exporting the same variable, and a PR run
-does not install a tool it never invokes. An `install-<tool>: true` input
-would have bought none of that and would have needed a new input per tool.
-
-syft used to be the example here, and every container repo carried a
-`mise.release.toml` pinning it. It is gone: BuildKit produces the release SBOM
-itself, so there is no tool to pin, install, or forget. This file is now for a
-tool genuinely particular to *one* repo's release.
+**No repo uses this today.** syft was the only tool ever pinned this way, and
+BuildKit replaced it, so every `mise.release.toml` in the org is deleted and
+nothing sets `mise-env`. What remains is the mechanism and its default, with
+no user. It is kept because the reasoning above still holds for the next
+release-only tool that turns up; if none does, delete the input rather than
+leave a worked example for a tool nobody runs.
 
 ### The container release build
 

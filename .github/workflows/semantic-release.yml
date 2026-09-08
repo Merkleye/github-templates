@@ -20,11 +20,11 @@ name: semantic-release
 #     the same script
 #
 # What it deliberately does not assemble is a tool, and it invokes none. A
-# release that needs one — cosign, say — declares it in mise.release.toml and
-# gets it from the same installer as the rest of the toolchain; see `mise-env`
-# below. The container release build needs no such tool: BuildKit produces the
-# SBOM itself. This workflow assembles an environment; what gets made in it is
-# the release config's business.
+# release that needs one of its own declares it in mise.release.toml and gets
+# it from the same installer as the rest of the toolchain; see `mise-env`
+# below. No repo does today — BuildKit produces the SBOM itself, which was the
+# only thing that ever needed one. This workflow assembles an environment;
+# what gets made in it is the release config's business.
 #
 # The container half is here rather than in a release template of its own
 # because everything around it — the full-history checkout, the App token, the
@@ -155,12 +155,12 @@ on:
         description: >-
           mise config environment for the job (MISE_ENV). `release` loads
           mise.release.toml on top of mise.toml, which is where a tool only
-          this repo's release needs belongs — cosign for a signature, say.
-          Pinning them there rather than installing them from an action means
-          one place decides the version, a contributor can run the release
-          steps locally, and a PR run never pays for them. A repo that needs
-          no release-only tool can leave this alone — with no mise.release.toml
-          to load, `release` is a no-op.
+          this repo's release needs would belong — pinned beside the rest of
+          the toolchain, so one place decides the version, a contributor can
+          run the release steps locally, and a PR run never pays for it.
+
+          No repo has such a file today, so this default is a no-op. Leave it
+          alone unless a release-only tool turns up; see the README.
         required: false
         type: string
         default: release
