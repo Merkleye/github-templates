@@ -1,5 +1,7 @@
 [tools]
 actionlint = "1.7.12"
+# The YAML parse check in ci.yml requires Python
+python = "3.14"
 
 [tasks."lint:actionlint"]
 description = "actionlint over the workflow files named as arguments."
