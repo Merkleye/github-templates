@@ -292,10 +292,13 @@ always read from the same commit rather than a mix.
 
 ## Known gaps
 
-- `useblacksmith/*` actions are referenced by major tag, not SHA. Blacksmith
-  does not publish SHA-addressable releases that stay valid across runner
-  image updates. `lint-workflows`' `allow-tags` default carries that prefix;
-  the allowlist is the record of the exception.
+- `useblacksmith/*` was the standing SHA-pinning exception here, on the
+  reasoning that Blacksmith publishes no SHA-addressable releases that stay
+  valid across runner image updates. #9 disproved that — Renovate pinned both
+  `setup-docker-builder` and `build-push-action`, and every reference in this
+  repo now names a commit. The prefix stays in `lint-workflows`' `allow-tags`
+  default because consuming repos still reference them by major tag; drop it
+  once they don't, and the exception disappears.
 - The Cloudflare preview templates cover cleanup, prune and deploy but not
   the build, because no two repos build the same way. If a third static site
   appears with the same Astro shape as the others, a `build-astro-site`

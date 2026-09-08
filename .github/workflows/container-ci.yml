@@ -111,7 +111,7 @@ jobs:
 
       - name: Set up Blacksmith builder
         if: steps.builder.outputs.builder == 'blacksmith'
-        uses: useblacksmith/setup-docker-builder@v1
+        uses: useblacksmith/setup-docker-builder@9309da73a81f66976a6d750572e221508b1e2682 # v1
 
       # Scoped per image: one shared cache key across a multi-image repo means
       # each build evicts the previous one's layers and every build is cold.
@@ -129,7 +129,7 @@ jobs:
 
       - name: Build ${{ matrix.image }} (Blacksmith)
         if: steps.builder.outputs.builder == 'blacksmith'
-        uses: useblacksmith/build-push-action@v2
+        uses: useblacksmith/build-push-action@9b0579bbec7a6cad2f171596c57e7ac1e7658850 # v2
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}

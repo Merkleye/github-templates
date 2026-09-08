@@ -218,6 +218,9 @@ jobs:
           git config user.name "${APP_SLUG}[bot]"
           git config user.email "${bot_id}+${APP_SLUG}[bot]@users.noreply.github.com"
 
+      # @main, not the SHA Renovate pinned on main: the `env` input this line
+      # passes is added by this same commit, so no existing commit has a
+      # setup-mise that accepts it. See the PR discussion.
       - uses: Merkleye/github-templates/.github/actions/setup-mise@main
         with:
           env: ${{ inputs.mise-env }}
@@ -257,7 +260,7 @@ jobs:
 
       - name: Set up Blacksmith builder
         if: steps.builder.outputs.builder == 'blacksmith'
-        uses: useblacksmith/setup-docker-builder@v1
+        uses: useblacksmith/setup-docker-builder@9309da73a81f66976a6d750572e221508b1e2682 # v1
 
       # GITHUB_TOKEN, not the App token: pushing a package needs `packages:
       # write` on this repo, which the job already has, and the App token is
