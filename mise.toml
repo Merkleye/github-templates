@@ -1,5 +1,5 @@
 [tools]
-actionlint = "1.7.7"
+actionlint = "1.7.12"
 
 [tasks."lint:actionlint"]
 description = "actionlint over the workflow files named as arguments."
