@@ -108,8 +108,8 @@ on:
       container-builder:
         description: >-
           `auto`, `docker`, or `blacksmith`. `auto` reads the runner label,
-          same rule as container-ci.yml: anything containing `blacksmith` gets
-          useblacksmith/*, everything else gets docker/*.
+          same rule as ghcr-pr-preview-image.yml: anything containing
+          `blacksmith` gets useblacksmith/*, everything else gets docker/*.
         required: false
         type: string
         default: auto
@@ -235,8 +235,8 @@ jobs:
           registry-url: ${{ inputs.npm-registry-url }}
           scope: ${{ inputs.npm-scope }}
 
-      # One rule for `auto`, shared with container-ci.yml and
-      # ghcr-pr-preview-image.yml — see .github/actions/resolve-builder.
+      # One rule for `auto`, shared with ghcr-pr-preview-image.yml — see
+      # .github/actions/resolve-builder.
       - name: Resolve builder
         id: builder
         if: inputs.containers

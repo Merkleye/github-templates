@@ -23,9 +23,8 @@ contract run. Those belong next to the code they test.
 | [`pr-title.yml`](.github/workflows/pr-title.yml) | Validates a PR title against Conventional Commits. |
 | [`cf-pages-preview-cleanup.yml`](.github/workflows/cf-pages-preview-cleanup.yml) | Deletes a PR's Cloudflare Pages preview when the PR closes, and rewrites the preview comment. |
 | [`cf-pages-preview-prune.yml`](.github/workflows/cf-pages-preview-prune.yml) | Scheduled safety net: deletes preview deployments older than N days. |
-| [`ghcr-pr-preview-image.yml`](.github/workflows/ghcr-pr-preview-image.yml) | Builds and pushes per-PR container images to GHCR under `pr-<n>` tags. |
+| [`ghcr-pr-preview-image.yml`](.github/workflows/ghcr-pr-preview-image.yml) | The container repo's PR gate: runs the repo's mise test task, then builds and pushes per-PR images to GHCR under `pr-<n>` tags. |
 | [`ghcr-pr-preview-cleanup.yml`](.github/workflows/ghcr-pr-preview-cleanup.yml) | Deletes those preview package versions when the PR closes. |
-| [`container-ci.yml`](.github/workflows/container-ci.yml) | Builds every image a repo ships and pushes nothing — the container-integrity gate. |
 | [`workflow-lint.yml`](.github/workflows/workflow-lint.yml) | actionlint, plus the org's `uses:` rules: SHA-pinned actions and no direct `jdx/mise-action`. |
 | [`semantic-release.yml`](.github/workflows/semantic-release.yml) | Assembles the environment semantic-release needs and runs it, container builder and registry login included. |
 
@@ -105,6 +104,14 @@ There is no reusable workflow for this, deliberately. The repeatable part is
 the installer, and `setup-mise` is it; the task names belong to the repo, and
 a template that only forwarded a list of them would add a hop without
 removing a copy. `examples/mise-tasks.yml` is the pattern to paste.
+
+The one exception is `ghcr-pr-preview-image.yml`, which runs one task itself
+— `test-task`, defaulting to `test`. It is not there to forward a task list;
+it is there because that workflow must not publish an image for a commit
+whose tests are failing, and `needs:` orders jobs within a workflow and
+nothing across workflows. A test job in a neighbouring ci.yml cannot gate a
+preview publish; it just runs beside it. Everything else about the convention
+holds — the task is the repo's, and the workflow calls it by name.
 
 A tool that only one kind of run needs still belongs in mise, not in a
 workflow input. `mise.release.toml` is loaded on top of `mise.toml` when
@@ -352,8 +359,18 @@ CI if a self-reference drifts off `@main`.
 
   That file is the repo's, not the template's — the label set is a fact about
   the repo's runners.
-- `container-ci.yml` builds and throws the image away. It does not scan it,
-  test it, or check that it starts. `merkleye`'s perf suite runs the dnstwist
-  sidecar for real, but that is a repo-specific job, not a template. If a
-  second repo wants "does the container come up and answer /health", that is
-  a worthwhile input to add here rather than a third copy.
+- **The container build proves the image builds, and nothing else.** It is
+  not scanned, not started, and not asked whether it answers. `merkleye`'s
+  perf suite runs the dnstwist sidecar for real, but that is a repo-specific
+  job, not a template. If a second repo wants "does the container come up and
+  answer /health", that is a worthwhile input to add to
+  `ghcr-pr-preview-image.yml` rather than a third copy.
+- **`container-ci.yml` is gone, folded into `ghcr-pr-preview-image.yml`.** It
+  built every image with `push: false` on every PR, which on a non-fork PR
+  was a second full build of the image the preview job was already building
+  and pushing from the same context and Containerfile — and the two ran in
+  parallel, so neither warmed the other's cache. What it uniquely covered was
+  fork PRs, which the preview workflow cannot publish for; that is now its
+  `fork-build` job, same `push: false` build, same absence of write scope. A
+  repo adopting this drops its `container-build` job, and drops its test job
+  too if that is all ci.yml had left.

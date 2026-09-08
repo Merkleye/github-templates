@@ -1,8 +1,8 @@
 name: PR preview image
 
-# Reusable: builds every image a repo ships and pushes it to GHCR under
-# per-PR tags, so a reviewer can `docker run` the change instead of reading
-# a Containerfile diff and hoping.
+# Reusable: runs the repo's test task, then builds every image the repo ships
+# and pushes it to GHCR under per-PR tags, so a reviewer can `docker run` the
+# change instead of reading a Containerfile diff and hoping.
 #
 # Two tags per image per PR:
 #   <image>:pr-<number>              moving, always the PR's latest head
@@ -12,10 +12,23 @@ name: PR preview image
 # safety property of this workflow: a PR can publish, but it can never
 # publish something a deployment would pick up.
 #
-# Fork PRs get a job that explains why no image appears rather than a red X.
-# Publishing from a fork would mean either `pull_request_target` (which runs
-# the fork's own Containerfile with a package-write token) or long-lived
-# registry credentials. Neither is worth a preview image.
+# The test gate is part of this workflow rather than a neighbouring one
+# because `needs:` reaches across jobs and never across workflows. A repo
+# with its tests in ci.yml and its preview here had no way to order the two:
+# the image for a commit whose tests were failing was published anyway, in
+# parallel with the run that was about to go red. The task name is an input
+# because the name belongs to the repo; that the gate runs does not.
+#
+# Fork PRs build without publishing. Publishing from a fork would mean either
+# `pull_request_target` (which runs the fork's own Containerfile with a
+# package-write token) or long-lived registry credentials, and neither is
+# worth a preview image -- but "does this Containerfile still build" is
+# worth checking on a fork PR exactly as much as anywhere else, so that build
+# runs with `push: false` and the summary says why no image appeared. That
+# job is what container-ci.yml used to do for every PR. It lives here now
+# because on a non-fork PR it was a second full build of the same image, from
+# the same context and Containerfile, alongside the one below that builds and
+# publishes.
 
 on:
   workflow_call:
@@ -29,6 +42,22 @@ on:
           [{"image":"merkleye","context":".","file":"Containerfile"}]
         required: true
         type: string
+      test-task:
+        description: >-
+          mise task that gates the build: nothing is built or published until
+          `mise run <task>` passes. The name is an input because task names
+          belong to the repo, and `test` is the org's convention rather than
+          this workflow's requirement. The caller needs a mise.toml — the
+          toolchain comes from it through setup-mise, the same way every
+          other Merkleye workflow gets one.
+        required: false
+        type: string
+        default: test
+      test-timeout-minutes:
+        description: Job timeout for the test gate.
+        required: false
+        type: number
+        default: 15
       registry:
         description: Container registry to push to.
         required: false
@@ -44,11 +73,11 @@ on:
       builder:
         description: >-
           `auto`, `docker`, or `blacksmith`. `auto` reads the runner label,
-          same rule as container-ci.yml and semantic-release.yml: anything
-          containing `blacksmith` gets useblacksmith/*, everything else gets
-          docker/*. Set it explicitly to run the docker builder on a
-          Blacksmith runner, which is a legitimate combination — the runner
-          and the builder are separate choices.
+          same rule as semantic-release.yml: anything containing `blacksmith`
+          gets useblacksmith/*, everything else gets docker/*. Set it
+          explicitly to run the docker builder on a Blacksmith runner, which
+          is a legitimate combination — the runner and the builder are
+          separate choices.
         required: false
         type: string
         default: auto
@@ -74,8 +103,40 @@ on:
 permissions: {}
 
 jobs:
+  test:
+    name: Test (mise run ${{ inputs.test-task }})
+    if: github.event.action != 'closed'
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.test-timeout-minutes }}
+    permissions:
+      contents: read
+    concurrency:
+      group: pr-preview-test-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      # The PR head rather than the merge ref, for the same reason the builds
+      # below check out the head: the tests that gate an image are the tests
+      # of the commit that image is named after.
+      # persist-credentials: false — nothing here pushes to git.
+      - name: Check out PR head commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - uses: Merkleye/github-templates/.github/actions/setup-mise@main
+
+      # Through `mise run`, not the command it wraps: the task is the repo's
+      # own definition of its gate, and a contributor runs the identical
+      # thing locally. See README, "The mise convention".
+      - name: Run the test gate
+        env:
+          TEST_TASK: ${{ inputs.test-task }}
+        run: mise run "${TEST_TASK}"
+
   publish-preview:
     name: Publish PR preview image (${{ matrix.image }})
+    needs: test
     if: github.event.action != 'closed' && github.event.pull_request.head.repo.fork == false
     runs-on: ${{ inputs.runs-on }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
@@ -90,8 +151,8 @@ jobs:
       group: pr-preview-publish-${{ github.event.pull_request.number }}-${{ matrix.image }}
       cancel-in-progress: true
     steps:
-      # One rule for `auto`, shared with container-ci.yml and
-      # semantic-release.yml — see .github/actions/resolve-builder.
+      # One rule for `auto`, shared with semantic-release.yml — see
+      # .github/actions/resolve-builder.
       - name: Resolve builder
         id: builder
         uses: Merkleye/github-templates/.github/actions/resolve-builder@main
@@ -204,18 +265,77 @@ jobs:
             echo "- Stable tags intentionally untouched: \`latest\` and semantic-version tags are never emitted from this workflow."
           } >> "${GITHUB_STEP_SUMMARY}"
 
-  fork-preview-note:
-    name: Preview publish unavailable for fork PRs
+  # The fork half of the same gate: build it, prove it, publish nothing. No
+  # registry login and no `packages: write`, so there is no write scope for
+  # fork code to misuse — the same reason container-ci.yml could run on fork
+  # PRs, which is the property this job inherits from it.
+  fork-build:
+    name: Build ${{ matrix.image }} (fork PR, not published)
+    needs: test
     if: github.event.action != 'closed' && github.event.pull_request.head.repo.fork == true
     runs-on: ${{ inputs.runs-on }}
-    timeout-minutes: 5
-    permissions: {}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.images) }}
+    concurrency:
+      group: pr-preview-fork-build-${{ github.event.pull_request.number }}-${{ matrix.image }}
+      cancel-in-progress: true
     steps:
+      - name: Resolve builder
+        id: builder
+        uses: Merkleye/github-templates/.github/actions/resolve-builder@main
+        with:
+          builder: ${{ inputs.builder }}
+          runs-on: ${{ inputs.runs-on }}
+
+      - name: Check out PR head commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Set up QEMU
+        if: inputs.platforms != ''
+        uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
+
+      - name: Set up Buildx
+        if: steps.builder.outputs.builder == 'docker'
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Set up Blacksmith builder
+        if: steps.builder.outputs.builder == 'blacksmith'
+        uses: useblacksmith/setup-docker-builder@19215110ab936351210feebdfa5b440b4493e184 # v2.2.0
+
+      - name: Build ${{ matrix.image }}
+        if: steps.builder.outputs.builder == 'docker'
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          push: false
+          platforms: ${{ inputs.platforms }}
+          tags: ${{ matrix.image }}:pr
+
+      - name: Build ${{ matrix.image }} (Blacksmith)
+        if: steps.builder.outputs.builder == 'blacksmith'
+        uses: useblacksmith/build-push-action@9b0579bbec7a6cad2f171596c57e7ac1e7658850 # v2
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          push: false
+          platforms: ${{ inputs.platforms }}
+          tags: ${{ matrix.image }}:pr
+
       - name: Explain fork PR behavior
         run: |
           {
-            echo "### Preview publish skipped"
+            echo "### Built \`${{ matrix.image }}\`, preview publish skipped"
             echo
-            echo "Fork-based pull requests do not publish preview images from this workflow."
+            echo "The image builds, so the Containerfile change is verified. It was not pushed:"
+            echo "fork-based pull requests do not publish preview images from this workflow."
             echo "This avoids granting package-write access to untrusted PR code via \`pull_request_target\` or long-lived registry credentials."
           } >> "${GITHUB_STEP_SUMMARY}"
