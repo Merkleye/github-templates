@@ -145,7 +145,7 @@ jobs:
 
       - name: Set up Blacksmith builder
         if: steps.builder.outputs.builder == 'blacksmith'
-        uses: useblacksmith/setup-docker-builder@19215110ab936351210feebdfa5b440b4493e184 # v2
+        uses: useblacksmith/setup-docker-builder@19215110ab936351210feebdfa5b440b4493e184 # v2.2.0
 
       - name: Log in to the registry
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0

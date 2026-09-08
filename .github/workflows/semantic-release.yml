@@ -260,7 +260,7 @@ jobs:
 
       - name: Set up Blacksmith builder
         if: steps.builder.outputs.builder == 'blacksmith'
-        uses: useblacksmith/setup-docker-builder@19215110ab936351210feebdfa5b440b4493e184 # v2
+        uses: useblacksmith/setup-docker-builder@19215110ab936351210feebdfa5b440b4493e184 # v2.2.0
 
       # GITHUB_TOKEN, not the App token: pushing a package needs `packages:
       # write` on this repo, which the job already has, and the App token is
