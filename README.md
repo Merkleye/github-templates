@@ -129,6 +129,19 @@ run the release steps locally by exporting the same variable, and a PR run
 does not install a tool it never invokes. An `install-<tool>: true` input
 would have bought none of that and would have needed a new input per tool.
 
+`semantic-release.yml` invokes syft itself when a caller sets `sbom: true`,
+and still does not install it — it reads the pin above and fails with those
+two lines if they are missing. The split is deliberate: *which* syft runs is a
+property of the repo's toolchain, but generating the SBOM and uploading it to
+the release semantic-release just cut is the same four steps in every repo,
+including the awkward one — semantic-release reports the version it chose to
+its own plugins and to nothing else, so the workflow recovers the tag by
+diffing the local tag list across the run rather than guessing at "the latest
+release". `sbom-target` decides what gets scanned; a repo that publishes an
+image should point it at the pushed image, not `dir:.`, so that the SBOM
+covers the base layers too. See
+[`examples/semantic-release-container.yml`](examples/semantic-release-container.yml).
+
 This repo holds itself to the same rule. [`mise.toml`](mise.toml) pins
 `actionlint` and defines the `lint:actionlint` task that `lint-workflows`
 runs; the action loads that file as mise's *global* config, so a consuming
