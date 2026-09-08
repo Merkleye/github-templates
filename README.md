@@ -122,6 +122,15 @@ run the release steps locally by exporting the same variable, and a PR run
 does not install a tool it never invokes. An `install-<tool>: true` input
 would have bought none of that and would have needed a new input per tool.
 
+This repo holds itself to the same rule. [`mise.toml`](mise.toml) pins
+`actionlint` and defines the `lint:actionlint` task that `lint-workflows`
+runs; the action loads that file as mise's *global* config, so a consuming
+repo gets the pin and the task without its own `mise.toml` mentioning either,
+and its own tools are not installed to lint YAML. `mise run lint:actionlint`
+is the same command locally. The cost of the arrangement is that every tool
+added to this repo's `mise.toml` is installed in every repo's lint job, so it
+stays limited to what the shared checks actually run.
+
 Two exceptions worth knowing before converting a lint step:
 
 - **`golangci-lint` stays on `golangci/golangci-lint-action`.** The release
@@ -182,7 +191,9 @@ jobs:
     uses: Merkleye/github-templates/.github/workflows/workflow-lint.yml@main
 ```
 
-It runs actionlint over the repo's workflows, then walks both
+It runs actionlint — the version pinned in this repo's `mise.toml`, bumped
+for the whole org by one Renovate PR here — over the repo's workflows, then
+walks both
 `.github/workflows` and `.github/actions` — composite actions are where the
 last unpinned references tend to hide — and fails on two things:
 

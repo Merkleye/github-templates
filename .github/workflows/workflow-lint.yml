@@ -4,8 +4,9 @@ name: Workflow lint
 # adopts the org's `uses:` conventions by adding one job rather than a step to
 # an existing one.
 #
-# What it enforces and why is in .github/actions/lint-workflows. What this
-# adds is the runner, the checkout and the timeout — and the fact that it is a
+# What it enforces and why is in .github/actions/lint-workflows -- including
+# actionlint's version, which is pinned in this repo's mise.toml rather than
+# passed in here. What this adds is the runner, the checkout and the timeout — and the fact that it is a
 # job means a repo with no other CI (a docs repo, a config repo) can still
 # have this one.
 
@@ -27,11 +28,6 @@ on:
         required: false
         type: boolean
         default: true
-      actionlint-version:
-        description: actionlint release to download.
-        required: false
-        type: string
-        default: "1.7.7"
       actionlint-paths:
         description: Space-separated globs for actionlint. Workflow files only.
         required: false
@@ -87,7 +83,6 @@ jobs:
       - uses: Merkleye/github-templates/.github/actions/lint-workflows@main
         with:
           actionlint: ${{ inputs.actionlint }}
-          actionlint-version: ${{ inputs.actionlint-version }}
           actionlint-paths: ${{ inputs.actionlint-paths }}
           scan-paths: ${{ inputs.scan-paths }}
           require-sha-pins: ${{ inputs.require-sha-pins }}

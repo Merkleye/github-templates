@@ -16,16 +16,16 @@ description: >-
 #
 # actionlint reads workflow files only; the pin and ban checks also walk
 # composite actions, which is where the last raw references tend to hide.
+#
+# actionlint itself comes from this repo's mise.toml -- the version is a pin
+# beside the rest of the org's toolchain, not an input a caller can drift on.
+# See the comments there for how it reaches a consuming repo.
 
 inputs:
   actionlint:
     description: Run actionlint.
     required: false
     default: "true"
-  actionlint-version:
-    description: actionlint release to download.
-    required: false
-    default: "1.7.7"
   actionlint-paths:
     description: >-
       Space-separated globs for actionlint, expanded by the shell. Workflow
@@ -69,31 +69,44 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Install actionlint
+    # Through setup-mise, not jdx/mise-action: the ban this action enforces
+    # applies to the action itself, and scan-paths covers .github/actions. The
+    # @main self-reference is the same arrangement the reusable workflows use.
+    #
+    # This step is here for the mise binary only. It runs with install: false
+    # and in a directory with no mise.toml in it, because anything it resolved
+    # in the calling repo would be that repo's whole toolchain -- a Go build,
+    # a Node install -- provisioned to lint YAML. The one tool this action
+    # needs is installed by name below, at the version this repo pins.
+    - name: Install mise
       if: inputs.actionlint == 'true'
-      shell: bash
-      env:
-        ACTIONLINT_VERSION: ${{ inputs.actionlint-version }}
-        RUNNER_TEMP_DIR: ${{ runner.temp }}
-      run: |
-        set -euo pipefail
-        curl -sSfL -o "${RUNNER_TEMP_DIR}/actionlint.tar.gz" \
-          "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
-        tar -xzf "${RUNNER_TEMP_DIR}/actionlint.tar.gz" -C "${RUNNER_TEMP_DIR}" actionlint
-        "${RUNNER_TEMP_DIR}/actionlint" --version
+      uses: Merkleye/github-templates/.github/actions/setup-mise@main
+      with:
+        install: "false"
+        working-directory: ${{ runner.temp }}
 
-    # Unquoted on purpose: the globs are expanded here, and actionlint takes
-    # the resulting file list.
+    # PATHS is unquoted on purpose: the shell expands the globs here, in the
+    # repo the job checked out, and the task appends the result to
+    # actionlint's arguments.
+    #
+    # MISE_GLOBAL_CONFIG_FILE rather than a config in the calling repo: the
+    # caller's mise.toml is its own toolchain and has no reason to carry a
+    # linter it never invokes. As the global config it layers underneath,
+    # which is what makes `mise run` resolve the task from the repo root.
+    # MISE_AUTO_INSTALL stops that same run from provisioning the caller's
+    # tools on the way to the task.
     - name: actionlint
       if: inputs.actionlint == 'true'
       shell: bash
       env:
         PATHS: ${{ inputs.actionlint-paths }}
-        RUNNER_TEMP_DIR: ${{ runner.temp }}
+        MISE_GLOBAL_CONFIG_FILE: ${{ github.action_path }}/../../../mise.toml
+        MISE_AUTO_INSTALL: "false"
       run: |
         set -euo pipefail
+        mise install actionlint
         # shellcheck disable=SC2086
-        "${RUNNER_TEMP_DIR}/actionlint" -color ${PATHS}
+        mise run lint:actionlint ${PATHS}
 
     - name: Check action references
       shell: bash
