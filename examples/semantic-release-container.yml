@@ -41,7 +41,7 @@ jobs:
       app-token: true
       containers: true
     secrets:
-      APP_ID: ${{ secrets.APP_ID }}
+      CLIENT_ID: ${{ secrets.CLIENT_ID }}
       APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
 
 # Everything else is defaulted: ghcr.io, `builder: auto` (resolved from

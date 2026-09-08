@@ -56,7 +56,7 @@ on:
       app-token:
         description: >-
           Mint a GitHub App installation token and release with it instead of
-          GITHUB_TOKEN. Needs the APP_ID and APP_PRIVATE_KEY secrets.
+          GITHUB_TOKEN. Needs the CLIENT_ID and APP_PRIVATE_KEY secrets.
         required: false
         type: boolean
         default: false
@@ -144,8 +144,11 @@ on:
         type: boolean
         default: false
     secrets:
-      APP_ID:
-        description: GitHub App ID. Required when app-token is true.
+      CLIENT_ID:
+        description: >-
+          GitHub App Client ID. Required when app-token is true. The App's
+          numeric id is deprecated by create-github-app-token, which carries a
+          deprecationMessage on its `app-id` input.
         required: false
       APP_PRIVATE_KEY:
         description: GitHub App private key. Required when app-token is true.
@@ -180,7 +183,7 @@ jobs:
         if: inputs.app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ secrets.APP_ID }}
+          client-id: ${{ secrets.CLIENT_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           repositories: ${{ inputs.app-repositories != '' && inputs.app-repositories || github.event.repository.name }}
 
