@@ -183,14 +183,20 @@ speculatively from the start.
 
 Reusable workflows reference this repo's own composite actions by full path
 at `@main`, self-referentially, so a workflow and the actions it calls are
-always read from the same commit rather than a mix.
+always read from the same commit rather than a mix. Those self-references are
+deliberately *not* pinned to a digest: a pin would only ever name the previous
+commit to this repo, so every merge would spawn a bot PR that re-pins the
+merge before it, with nothing gained. `renovate.json` disables updates for
+`Merkleye/github-templates` and `scripts/check-action-pins.py` fails CI if a
+self-reference drifts off `@main`.
 
 ## Conventions this repo holds itself to
 
 - **Every third-party action is pinned to a full commit SHA**, with the human
   version in a trailing comment. `scripts/check-action-pins.py` fails CI
   otherwise. A mutable tag here would be a mutable tag in every repo that
-  calls these workflows.
+  calls these workflows. This repo's references to itself are the exception
+  and must stay on `@main`; the same script enforces that direction too.
 - **Least privilege.** Workflows declare `permissions: {}` at the top and each
   job asks for exactly what it needs. Callers do the same.
 - **No PR code runs with write scope.** The container preview refuses to
