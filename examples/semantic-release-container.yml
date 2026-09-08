@@ -1,5 +1,5 @@
 # .github/workflows/release.yml — for a repo whose release builds and pushes a
-# container image and attaches an SBOM per image to the GitHub Release.
+# container image with an SBOM attestation per image.
 #
 # The build comes from the template too, via `images`. Each entry is built for
 # `container-platforms` and pushed as v1.2.3, v1 and latest — an exact pin plus
@@ -16,20 +16,11 @@
 # image nobody can pull.
 #
 # An SPDX SBOM per image per platform comes with the build, and there is no
-# input to turn it off — a published image without one is the gap. Scanning the
-# pushed image rather than the source tree is the point: the SBOM describes the
-# layers a user pulls, base image included. The files land in sbom/, which this
-# repo's .releaserc uploads:
+# input to turn it off — a published image without one is the gap. BuildKit
+# produces it during the build, so there is no tool to pin and nothing to add
+# to this file. It rides along as an attestation on the image:
 #
-#   ["@semantic-release/github", { "assets": [{ "path": "sbom/*.spdx.json" }] }]
-#
-# syft is not an input either. It goes in mise.release.toml beside the rest of
-# the toolchain, and `mise-env: release` (the default) is what loads it — the
-# build fails with these two lines if it is missing:
-#
-#   # mise.release.toml — tools only a release needs
-#   [tools]
-#   syft = "1"
+#   docker buildx imagetools inspect <ref> --format '{{ json .SBOM }}'
 name: Release
 
 on:

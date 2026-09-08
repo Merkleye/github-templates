@@ -20,12 +20,10 @@ name: semantic-release
 #     the same script
 #
 # What it deliberately does not assemble is a tool, and it invokes none. A
-# release that needs syft or cosign declares it in mise.release.toml and gets
-# it from the same installer as the rest of the toolchain — see `mise-env`
-# below. The container release build invokes syft off that PATH to produce an
-# SBOM per published image, but it does so from inside semantic-release's
-# prepare phase, where the rest of the artifact is produced, rather than as
-# steps here. This workflow assembles an environment; what gets made in it is
+# release that needs one — cosign, say — declares it in mise.release.toml and
+# gets it from the same installer as the rest of the toolchain; see `mise-env`
+# below. The container release build needs no such tool: BuildKit produces the
+# SBOM itself. This workflow assembles an environment; what gets made in it is
 # the release config's business.
 #
 # The container half is here rather than in a release template of its own
@@ -156,14 +154,13 @@ on:
       mise-env:
         description: >-
           mise config environment for the job (MISE_ENV). `release` loads
-          mise.release.toml on top of mise.toml, which is where the tools only
-          a release needs belong — syft for an SBOM, cosign for a signature.
+          mise.release.toml on top of mise.toml, which is where a tool only
+          this repo's release needs belongs — cosign for a signature, say.
           Pinning them there rather than installing them from an action means
           one place decides the version, a contributor can run the release
-          steps locally, and a PR run never pays for them. The container
-          release build reads syft from exactly this config; setting `mise-env`
-          to something that does not pin syft turns it into a failed release,
-          not a silent one.
+          steps locally, and a PR run never pays for them. A repo that needs
+          no release-only tool can leave this alone — with no mise.release.toml
+          to load, `release` is a no-op.
         required: false
         type: string
         default: release

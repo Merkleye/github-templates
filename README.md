@@ -120,7 +120,7 @@ workflow input. `mise.release.toml` is loaded on top of `mise.toml` when
 ```toml
 # mise.release.toml -- tools only a release needs
 [tools]
-syft = "1"
+cosign = "2"
 ```
 
 `setup-mise` takes the same thing as `env:` for a step-level caller. The point
@@ -129,10 +129,10 @@ run the release steps locally by exporting the same variable, and a PR run
 does not install a tool it never invokes. An `install-<tool>: true` input
 would have bought none of that and would have needed a new input per tool.
 
-The release build invokes syft off that pin and still does not install it — it
-fails with those two lines if they are missing. The split is deliberate:
-*which* syft runs is a property of the repo's toolchain; that an SBOM is
-produced at all is not the repo's decision to make.
+syft used to be the example here, and every container repo carried a
+`mise.release.toml` pinning it. It is gone: BuildKit produces the release SBOM
+itself, so there is no tool to pin, install, or forget. This file is now for a
+tool genuinely particular to *one* repo's release.
 
 ### The container release build
 
@@ -163,17 +163,26 @@ An SPDX SBOM per image per platform comes with it, and there is no input to
 turn it off. A published image without one is the gap, and the release that
 publishes it is the only moment the information exists — making it a switch
 would have meant every repo deciding the same question again and one of them
-getting it wrong. Per platform because a multi-arch manifest list holds
-different packages on each architecture, so scanning the list digest resolves
-to whichever platform the runner happens to be and silently describes half the
-release. They are written to `sbom/`, which the repo's
-`@semantic-release/github` `assets` glob uploads:
+getting it wrong.
 
-```json
-["@semantic-release/github", { "assets": [{ "path": "sbom/*.spdx.json" }] }]
+BuildKit produces it, via `--sbom=true` on the build, rather than a separate
+scan of the pushed image. That removes the tool entirely — no syft to pin, no
+`mise.release.toml`, nothing a repo has to remember — and it is the more
+faithful answer: BuildKit scans each platform from inside its own build, where
+a post-hoc scan of a multi-arch manifest list resolves to whichever platform
+the runner happens to be and silently describes half of what shipped.
+
+The SBOM is an attestation on the image in the registry rather than a file on
+the GitHub Release. Read one with:
+
+```
+docker buildx imagetools inspect ghcr.io/merkleye/dnstwist:v1.0.0 \
+  --format '{{ json .SBOM }}'
 ```
 
-`prepare` runs before `publish`, so they exist by the time that plugin looks.
+That is a real change for anyone who was downloading `*.spdx.json` off a
+release page; the tradeoff is that the SBOM now travels with the image
+wherever it is pulled, instead of living next to it.
 
 The workflow cannot run the build itself. It has to happen inside
 semantic-release's `prepare` phase: a failure there aborts before the tag and
@@ -405,6 +414,9 @@ CI if a self-reference drifts off `@main`.
   What each repo still owns is the one line in `.releaserc` that invokes it —
   unavoidable, because the build has to run inside semantic-release's own
   prepare phase to abort the release before the tag exists.
+- **Renovate and `mise.release.toml` is unconfirmed, and now unexercised.**
+  syft was the only tool pinned this way org-wide and it is gone. Settle this
+  before a second tool moves to an `MISE_ENV`-scoped file. The original note:
 - **Renovate and `mise.release.toml` is unconfirmed.** The mise manager's
   default file patterns cover `mise.toml` and `mise/config.toml`; whether an
   `MISE_ENV`-scoped `mise.<env>.toml` is matched has not been checked. If it
