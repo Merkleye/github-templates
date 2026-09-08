@@ -1,5 +1,5 @@
 # .github/workflows/release.yml — for a repo whose release builds and pushes a
-# container image and attaches an SBOM to the GitHub Release.
+# container image and attaches an SBOM per image to the GitHub Release.
 #
 # The build comes from the template too, via `images`. Each entry is built for
 # `container-platforms` and pushed as v1.2.3, v1 and latest — an exact pin plus
@@ -15,18 +15,17 @@
 # publish the release first and then fail, leaving a release that points at an
 # image nobody can pull.
 #
-# The SBOM is the template's, because attaching an asset to the release
-# semantic-release just cut was the part every repo reimplemented. `sbom: true`
-# runs syft after the release and uploads the result. Scanning the pushed image
-# rather than the source tree is the point: the SBOM then describes the layers
-# a user pulls, base image included, not the tree they were built from — and
-# `sbom-target: images` scans every image `images` declared, since the image
-# does not exist until the prepare step has run and one target cannot name
-# several images anyway.
+# An SPDX SBOM per image per platform comes with the build, and there is no
+# input to turn it off — a published image without one is the gap. Scanning the
+# pushed image rather than the source tree is the point: the SBOM describes the
+# layers a user pulls, base image included. The files land in sbom/, which this
+# repo's .releaserc uploads:
 #
-# syft is still not an input. It goes in mise.release.toml beside the rest of
+#   ["@semantic-release/github", { "assets": [{ "path": "sbom/*.spdx.json" }] }]
+#
+# syft is not an input either. It goes in mise.release.toml beside the rest of
 # the toolchain, and `mise-env: release` (the default) is what loads it — the
-# SBOM step fails with these two lines if it is missing:
+# build fails with these two lines if it is missing:
 #
 #   # mise.release.toml — tools only a release needs
 #   [tools]
@@ -61,11 +60,6 @@ jobs:
       # Same JSON the repo's ghcr-pr-preview-image.yml caller passes, so the
       # preview builds exactly what the release will build.
       images: '[{"image":"my-service","context":".","file":"Containerfile"}]'
-      sbom: true
-      # One SBOM per image in `images`, scanned at the tag just published.
-      # A literal target would work for one image and quietly describe only
-      # the first of several.
-      sbom-target: images
     secrets:
       CLIENT_ID: ${{ secrets.CLIENT_ID }}
       APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}

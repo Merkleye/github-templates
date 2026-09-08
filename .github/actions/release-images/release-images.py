@@ -17,30 +17,49 @@ build that fails here aborts the release before semantic-release tags the
 commit or creates the GitHub Release. Moving it after would leave a published
 release pointing at an image that was never pushed.
 
-Only build, push and tag. The SBOM is the template's job (`sbom: true` in
-semantic-release.yml), which scans the pushed image and attaches the result to
-the Release that semantic-release just cut.
+An SBOM per image per platform comes with it, and is not optional. A published
+image without one is the gap, and a release that publishes images is the only
+moment the information exists; making it a per-repo switch would have meant
+every repo deciding the same thing again, and one of them getting it wrong.
+Per platform because a multi-arch manifest list has different packages on each
+architecture, so the list digest is not a meaningful scan target -- syft
+against it resolves to whichever platform the runner happens to be.
 
-Environment, all set by the release-images action:
+syft is not installed here. It is pinned in the repo's mise.release.toml like
+the rest of the toolchain and comes off PATH as a shim; this fails with the
+lines to add if the toolchain does not pin it. Which version runs stays a
+property of the repo's toolchain, and only the plumbing is shared.
+
+The SBOMs land in MERKLEYE_SBOM_DIR inside the workspace so the repo's
+@semantic-release/github `assets` glob uploads them to the Release. prepare
+runs before publish, so they exist by the time that plugin looks.
+
+Environment, all set by the release-images action except the last:
   MERKLEYE_IMAGES       required. JSON array of {image, context, file}, the
                         same shape container-ci.yml and the preview workflow
                         take, so a repo declares its image set once.
   MERKLEYE_REGISTRY     registry and namespace. Defaults to
                         ghcr.io/<owner of GITHUB_REPOSITORY>.
   CONTAINER_PLATFORMS   defaults to linux/amd64,linux/arm64.
+  MERKLEYE_SBOM_DIR     where the SBOMs are written. Defaults to sbom/, which
+                        is what the repos' assets glob names.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import pathlib
 import shlex
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
 from typing import NoReturn
 
 DEFAULT_PLATFORMS = "linux/amd64,linux/arm64"
+DEFAULT_SBOM_DIR = "sbom"
+SBOM_FORMAT = "spdx-json"
 REQUIRED_KEYS = ("image", "context", "file")
 
 
@@ -143,6 +162,49 @@ def oci_build_args(version: str, dry_run: bool) -> dict[str, str]:
     }
 
 
+def require_syft() -> None:
+    if shutil.which("syft"):
+        return
+    fail(
+        "syft is not on PATH. A release that publishes images generates an "
+        "SBOM for each one, and the version is the repo's to pin. Add it to "
+        'mise.release.toml:\n\n[tools]\nsyft = "1"\n'
+    )
+
+
+def sbom_image(ref: str, version: str, sbom_dir: pathlib.Path, image: str,
+               dry_run: bool) -> None:
+    """One SBOM per linux platform in the image's manifest list."""
+    raw = run(
+        ["docker", "buildx", "imagetools", "inspect", f"{ref}:v{version}", "--raw"],
+        dry_run=dry_run,
+        capture=True,
+    )
+    if dry_run:
+        # Nothing was pushed, so there is no manifest to read back. Show the
+        # shape of what would be scanned rather than inventing a digest.
+        print(f"+ syft registry:{ref}@<digest per platform> "
+              f"-o {SBOM_FORMAT}={sbom_dir}/{image}-<arch>.spdx.json")
+        return
+
+    manifests = json.loads(raw).get("manifests", [])
+    if not manifests:
+        fail(f"{ref}:v{version} has no manifest list to scan.")
+    scanned = 0
+    for manifest in manifests:
+        platform = manifest.get("platform", {})
+        # Attestation and unknown entries carry platform.os == "unknown".
+        if platform.get("os") != "linux":
+            continue
+        arch = platform.get("architecture", "unknown")
+        out = sbom_dir / f"{image}-{arch}.{SBOM_FORMAT.replace('-', '.')}"
+        run(["syft", f"registry:{ref}@{manifest['digest']}",
+             "-o", f"{SBOM_FORMAT}={out}"], dry_run=False)
+        scanned += 1
+    if not scanned:
+        fail(f"{ref}:v{version} has no linux platform to scan.")
+
+
 def main() -> int:
     argv = sys.argv[1:]
 
@@ -182,11 +244,26 @@ def main() -> int:
         os.environ.get("CONTAINER_PLATFORMS", "").strip() or DEFAULT_PLATFORMS
     )
     oci = oci_build_args(version, dry_run)
+    sbom_dir = pathlib.Path(
+        os.environ.get("MERKLEYE_SBOM_DIR", "").strip() or DEFAULT_SBOM_DIR
+    )
+
+    # Before the first build, not after it: a missing syft should not be
+    # discovered once images are already pushed and the release is half done.
+    if not dry_run:
+        require_syft()
+        sbom_dir.mkdir(parents=True, exist_ok=True)
 
     for entry in images:
-        ref = f"{reg}/{entry['image']}"
-        print(f"::group::Build + push {entry['image']}")
+        image = entry["image"]
+        ref = f"{reg}/{image}"
+
+        print(f"::group::Build + push {image}")
         run(build_argv(ref, version, major, platforms, entry, oci), dry_run=dry_run)
+        print("::endgroup::")
+
+        print(f"::group::SBOM {image}")
+        sbom_image(ref, version, sbom_dir, image, dry_run)
         print("::endgroup::")
 
     return 0

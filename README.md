@@ -129,21 +129,10 @@ run the release steps locally by exporting the same variable, and a PR run
 does not install a tool it never invokes. An `install-<tool>: true` input
 would have bought none of that and would have needed a new input per tool.
 
-`semantic-release.yml` invokes syft itself when a caller sets `sbom: true`,
-and still does not install it — it reads the pin above and fails with those
-two lines if they are missing. The split is deliberate: *which* syft runs is a
-property of the repo's toolchain, but generating the SBOM and uploading it to
-the release semantic-release just cut is the same four steps in every repo,
-including the awkward one — semantic-release reports the version it chose to
-its own plugins and to nothing else, so the workflow recovers the tag by
-diffing the local tag list across the run rather than guessing at "the latest
-release". `sbom-target` decides what gets scanned; a repo that publishes an
-image should point it at the pushed image, not `dir:.`, so that the SBOM
-covers the base layers too. With `images` set, `sbom-target: images` does that
-for every image the release published at once — one asset per image, named
-after it — which is the only shape that works for a repo shipping more than
-one. See
-[`examples/semantic-release-container.yml`](examples/semantic-release-container.yml).
+The release build invokes syft off that pin and still does not install it — it
+fails with those two lines if they are missing. The split is deliberate:
+*which* syft runs is a property of the repo's toolchain; that an SBOM is
+produced at all is not the repo's decision to make.
 
 ### The container release build
 
@@ -169,6 +158,22 @@ newest release. semantic-release only moves forward on a release branch, so
 overwriting the two moving tags is always correct. The JSON is the same shape
 `ghcr-pr-preview-image.yml` and `container-ci.yml` take, so a repo declares its
 image set once and the PR preview builds what the release will build.
+
+An SPDX SBOM per image per platform comes with it, and there is no input to
+turn it off. A published image without one is the gap, and the release that
+publishes it is the only moment the information exists — making it a switch
+would have meant every repo deciding the same question again and one of them
+getting it wrong. Per platform because a multi-arch manifest list holds
+different packages on each architecture, so scanning the list digest resolves
+to whichever platform the runner happens to be and silently describes half the
+release. They are written to `sbom/`, which the repo's
+`@semantic-release/github` `assets` glob uploads:
+
+```json
+["@semantic-release/github", { "assets": [{ "path": "sbom/*.spdx.json" }] }]
+```
+
+`prepare` runs before `publish`, so they exist by the time that plugin looks.
 
 The workflow cannot run the build itself. It has to happen inside
 semantic-release's `prepare` phase: a failure there aborts before the tag and
