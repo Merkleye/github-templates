@@ -1,4 +1,10 @@
 # .github/workflows/pr-preview-image.yml
+#
+# This is the whole PR gate for a repo that ships container images: the
+# template runs the repo's mise test task first and builds nothing until it
+# passes, so there is no separate ci.yml to keep in step with it. Ordering is
+# why the test job lives in the template — `needs:` cannot reach across
+# workflows, so a test job in a neighbouring file cannot gate this one.
 name: PR preview image lifecycle
 
 on:
@@ -25,6 +31,11 @@ jobs:
           {"image":"merkleye","context":".","file":"Containerfile"},
           {"image":"merkleye-dnstwist","context":"sidecars/dnstwist","file":"sidecars/dnstwist/Containerfile"}
         ]
+      # Defaults to `test`; name it only when the repo's mise.toml calls the
+      # task something else. A repo whose gate is several tasks wraps them in
+      # one mise task and names that -- the composition belongs in mise.toml,
+      # where a contributor runs the same thing locally.
+      test-task: ci
       builder: blacksmith
       runs-on: blacksmith-2vcpu-ubuntu-2404
 
