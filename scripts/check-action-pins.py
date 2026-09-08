@@ -4,15 +4,19 @@
 A template repo is a supply-chain amplifier: a mutable tag here is a mutable
 tag in every repo that calls these workflows. So the rule is stricter than in
 a normal repo -- a `uses:` either names a 40-character commit SHA, or it is
-one of the two documented exceptions below and says why.
+the one documented exception below and says why.
+
+The one action this rule does not apply to is this repo referring to itself.
+Those references must be `@main` -- not a SHA -- so a workflow and the
+composite actions it calls are always read from the same commit. Pinning them
+would mean every merge here spawns a bot PR that only re-pins the previous
+merge, forever; `renovate.json` disables updates for them and this script
+fails if one drifts to a SHA.
 
 Exceptions:
-  * Merkleye/github-templates/...@<ref>  -- this repo referring to itself.
-    Pinning it to a SHA would mean rewriting every internal reference on
-    every release; the tag is what makes `v1` mean one coherent set.
-  * useblacksmith/*                       -- Blacksmith publishes major-version
-    tags only and does not keep SHA-addressable releases usable across runner
-    image updates. Tracked in the README's "Known gaps".
+  * useblacksmith/*  -- Blacksmith publishes major-version tags only and does
+    not keep SHA-addressable releases usable across runner image updates.
+    Tracked in the README's "Known gaps".
 """
 
 from __future__ import annotations
@@ -25,6 +29,7 @@ USES = re.compile(r"^\s*-?\s*uses:\s*(?P<ref>\S+)", re.MULTILINE)
 SHA = re.compile(r"^[0-9a-f]{40}$")
 
 SELF_PREFIX = "Merkleye/github-templates/"
+SELF_REF = "@main"
 TAG_ALLOWED_PREFIXES = ("useblacksmith/",)
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -52,6 +57,11 @@ def main() -> int:
             checked += 1
 
             if ref.startswith(SELF_PREFIX):
+                if not ref.endswith(SELF_REF):
+                    problems.append(
+                        f"{rel}:{line}: `{ref}` is a self-reference and must be"
+                        f" `{SELF_REF}`, not a pinned ref"
+                    )
                 continue
             if any(ref.startswith(p) for p in TAG_ALLOWED_PREFIXES):
                 continue
@@ -67,7 +77,7 @@ def main() -> int:
                 )
 
     if problems:
-        print("Unpinned actions found:\n", file=sys.stderr)
+        print("Action reference problems found:\n", file=sys.stderr)
         for problem in problems:
             print(f"  {problem}", file=sys.stderr)
         print(
