@@ -270,7 +270,7 @@ jobs:
       # `npm publish` authenticate with.
       - name: Configure registry auth
         if: inputs.npm-registry-url != ''
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           registry-url: ${{ inputs.npm-registry-url }}
           scope: ${{ inputs.npm-scope }}
@@ -290,13 +290,13 @@ jobs:
       # list of just the emulated half.
       - name: Set up QEMU
         if: inputs.containers && inputs.container-platforms != ''
-        uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
         with:
           platforms: ${{ inputs.container-platforms }}
 
       - name: Set up Buildx
         if: steps.builder.outputs.builder == 'docker'
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Set up Blacksmith builder
         if: steps.builder.outputs.builder == 'blacksmith'
